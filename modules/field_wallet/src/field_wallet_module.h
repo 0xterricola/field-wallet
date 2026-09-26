@@ -16,6 +16,9 @@ public:
 
     /// Returns the version reported by the underlying LEZ Core module.
     std::string lez_core_version();
+
+    /// Diagnostic representation of the authenticated Logos caller.
+    std::string caller_identity();
 };
 
 #endif // FIELD_WALLET_MODULE_H

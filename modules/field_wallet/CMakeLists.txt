@@ -16,4 +16,5 @@ logos_module(
     SOURCES
         src/field_wallet_module.h
         src/field_wallet_module.cpp
+        src/provider_identity.h
 )
