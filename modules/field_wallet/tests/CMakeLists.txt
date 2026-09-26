@@ -8,6 +8,7 @@ logos_test(
     TEST_SOURCES
         main.cpp
         test_provider_identity.cpp
+        test_provider_permissions.cpp
     EXTRA_INCLUDES
         ../src
 )
