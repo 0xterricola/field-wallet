@@ -3,37 +3,41 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include <logos_caller.h>
 
 namespace field {
 
+inline std::string encodeIdentityPart(std::string_view value)
+{
+    return std::to_string(value.size()) + ":" + std::string(value);
+}
+
 inline std::optional<std::string> callerKey(const logos::LogosCaller& caller)
 {
     switch (caller.kind) {
-    case logos::CallerKind::Module: {
+    case logos::CallerKind::Module:
         if (caller.name.empty())
             return std::nullopt;
 
-        std::string key = "module:" + caller.name;
-
-        if (!caller.instance.empty())
-            key += ":instance:" + caller.instance;
-
-        return key;
-    }
+        return "module|" +
+               encodeIdentityPart(caller.name) + "|" +
+               encodeIdentityPart(caller.instance);
 
     case logos::CallerKind::Derived:
         if (caller.parent.empty() || caller.leaf.empty())
             return std::nullopt;
 
-        return "derived:" + caller.parent + ":leaf:" + caller.leaf;
+        return "derived|" +
+               encodeIdentityPart(caller.parent) + "|" +
+               encodeIdentityPart(caller.leaf);
 
     case logos::CallerKind::Operator:
         if (caller.name.empty())
             return std::nullopt;
 
-        return "operator:" + caller.name;
+        return "operator|" + encodeIdentityPart(caller.name);
 
     case logos::CallerKind::Host:
         return "host";

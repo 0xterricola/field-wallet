@@ -12,7 +12,7 @@ LOGOS_TEST(module_caller_key_without_instance) {
     const auto key = field::callerKey(caller);
 
     LOGOS_ASSERT(key.has_value());
-    LOGOS_ASSERT_EQ(*key, std::string("module:example_app"));
+    LOGOS_ASSERT_EQ(*key, std::string("module|11:example_app|0:"));
 }
 
 LOGOS_TEST(module_caller_key_with_instance) {
@@ -26,7 +26,7 @@ LOGOS_TEST(module_caller_key_with_instance) {
     LOGOS_ASSERT(key.has_value());
     LOGOS_ASSERT_EQ(
         *key,
-        std::string("module:example_app:instance:abc123"));
+        std::string("module|11:example_app|6:abc123"));
 }
 
 LOGOS_TEST(derived_caller_key) {
@@ -40,7 +40,7 @@ LOGOS_TEST(derived_caller_key) {
     LOGOS_ASSERT(key.has_value());
     LOGOS_ASSERT_EQ(
         *key,
-        std::string("derived:example_app:leaf:window_1"));
+        std::string("derived|11:example_app|8:window_1"));
 }
 
 LOGOS_TEST(operator_caller_key) {
@@ -51,7 +51,7 @@ LOGOS_TEST(operator_caller_key) {
     const auto key = field::callerKey(caller);
 
     LOGOS_ASSERT(key.has_value());
-    LOGOS_ASSERT_EQ(*key, std::string("operator:alice"));
+    LOGOS_ASSERT_EQ(*key, std::string("operator|5:alice"));
 }
 
 LOGOS_TEST(host_caller_key) {
@@ -97,4 +97,23 @@ LOGOS_TEST(operator_without_name_has_no_key) {
     caller.kind = logos::CallerKind::Operator;
 
     LOGOS_ASSERT_FALSE(field::callerKey(caller).has_value());
+}
+
+
+LOGOS_TEST(module_caller_key_encoding_is_unambiguous) {
+    logos::LogosCaller first;
+    first.kind = logos::CallerKind::Module;
+    first.name = "a:instance:b";
+
+    logos::LogosCaller second;
+    second.kind = logos::CallerKind::Module;
+    second.name = "a";
+    second.instance = "b";
+
+    const auto first_key = field::callerKey(first);
+    const auto second_key = field::callerKey(second);
+
+    LOGOS_ASSERT(first_key.has_value());
+    LOGOS_ASSERT(second_key.has_value());
+    LOGOS_ASSERT(*first_key != *second_key);
 }
