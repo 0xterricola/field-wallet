@@ -19,4 +19,5 @@ logos_module(
         src/provider_identity.h
         src/provider_permissions.h
         src/provider_authorization.h
+        src/permission_store.h
 )

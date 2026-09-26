@@ -10,6 +10,7 @@ logos_test(
         test_provider_identity.cpp
         test_provider_permissions.cpp
         test_provider_authorization.cpp
+        test_permission_store.cpp
     EXTRA_INCLUDES
         ../src
 )
