@@ -9,6 +9,7 @@ logos_test(
         main.cpp
         test_provider_identity.cpp
         test_provider_permissions.cpp
+        test_provider_authorization.cpp
     EXTRA_INCLUDES
         ../src
 )
