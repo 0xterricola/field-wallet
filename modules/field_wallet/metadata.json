@@ -1,0 +1,31 @@
+{
+  "name": "field_wallet",
+  "display_name": "Field Wallet",
+  "version": "0.1.0",
+  "description": "Privacy-preserving wallet provider and approval layer for Logos Execution Zones",
+  "author": "0xterricola",
+  "type": "core",
+  "category": "wallet",
+  "interface": "universal",
+  "codegen": {
+    "impl_header": "src/field_wallet_module.h",
+    "impl_class": "FieldWalletModule"
+  },
+  "main": "field_wallet_plugin",
+  "dependencies": ["lez_core"],
+  "capabilities": [],
+  "include": [],
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": ["nlohmann_json"]
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
+  }
+}
