@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace field {
 
@@ -60,6 +61,17 @@ public:
     std::size_t size() const
     {
         return grants_.size();
+    }
+
+    std::vector<PermissionGrant> all() const
+    {
+        std::vector<PermissionGrant> result;
+        result.reserve(grants_.size());
+
+        for (const auto& [key, grant] : grants_)
+            result.push_back(grant);
+
+        return result;
     }
 
 private:
