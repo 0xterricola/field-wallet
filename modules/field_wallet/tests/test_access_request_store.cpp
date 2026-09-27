@@ -206,3 +206,37 @@ LOGOS_TEST(access_request_store_removes_request_after_last_capability) {
         store.size(),
         static_cast<std::size_t>(0));
 }
+
+LOGOS_TEST(access_request_store_rejects_unrequested_capability_removal) {
+    field::AccessRequestStore store;
+
+    LOGOS_ASSERT_TRUE(
+        store.requestCapability(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_FALSE(
+        store.removeCapability(
+            "module|5:app_a|0:",
+            field::Capability::AccountBalanceRead));
+
+    const auto request =
+        store.find("module|5:app_a|0:");
+
+    LOGOS_ASSERT_TRUE(request.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        request->capabilities.contains(
+            field::Capability::AccountIdentityRead));
+}
+
+LOGOS_TEST(access_request_store_rejects_missing_caller_removal) {
+    field::AccessRequestStore store;
+
+    LOGOS_ASSERT_FALSE(
+        store.removeCapability(
+            "module|7:missing|0:",
+            field::Capability::AccountIdentityRead));
+}

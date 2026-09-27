@@ -223,6 +223,99 @@ std::string FieldWalletModule::approval_list_requests()
     return out.dump();
 }
 
+std::string FieldWalletModule::approval_grant_request(
+    const std::string& caller_key,
+    const std::string& account_id,
+    const std::string& account_kind,
+    const std::string& capability)
+{
+    nlohmann::json out;
+
+    if (!provider_state_.ready()) {
+        out["ok"] = false;
+        out["code"] = "provider_not_ready";
+        return out.dump();
+    }
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    if (caller_key.empty() || account_id.empty()) {
+        out["ok"] = false;
+        out["code"] = "invalid_request";
+        return out.dump();
+    }
+
+    const auto kind =
+        field::parseAccountKind(account_kind);
+
+    if (!kind.has_value()) {
+        out["ok"] = false;
+        out["code"] = "invalid_account_kind";
+        return out.dump();
+    }
+
+    const auto parsed_capability =
+        field::parseCapability(capability);
+
+    if (!parsed_capability.has_value()) {
+        out["ok"] = false;
+        out["code"] = "invalid_capability";
+        return out.dump();
+    }
+
+    const auto request =
+        access_requests_.find(caller_key);
+
+    if (!request.has_value()) {
+        out["ok"] = false;
+        out["code"] = "request_not_found";
+        return out.dump();
+    }
+
+    if (!request->capabilities.contains(
+            *parsed_capability)) {
+        out["ok"] = false;
+        out["code"] = "capability_not_requested";
+        return out.dump();
+    }
+
+    if (!provider_state_.grantCapability(
+            caller_key,
+            account_id,
+            *kind,
+            *parsed_capability)) {
+        out["ok"] = false;
+        out["code"] = "permission_update_failed";
+        return out.dump();
+    }
+
+    if (!access_requests_.removeCapability(
+            caller_key,
+            *parsed_capability)) {
+        out["ok"] = false;
+        out["code"] = "request_consume_failed";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["moduleName"] = request->module_name;
+    out["moduleInstance"] = request->module_instance;
+    out["accountId"] = account_id;
+    out["accountKind"] =
+        field::accountKindName(*kind);
+    out["capability"] =
+        field::capabilityName(*parsed_capability);
+
+    return out.dump();
+}
+
 std::string FieldWalletModule::approval_grant_capability(
     const std::string& module_name,
     const std::string& module_instance,
