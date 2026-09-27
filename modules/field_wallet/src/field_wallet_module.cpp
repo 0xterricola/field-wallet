@@ -371,6 +371,98 @@ std::string FieldWalletModule::approval_list_transaction_requests()
     return out.dump();
 }
 
+std::string FieldWalletModule::approval_execute_public_transfer(
+    uint64_t request_id)
+{
+    nlohmann::json out;
+
+    if (!provider_state_.ready()) {
+        out["ok"] = false;
+        out["code"] = "provider_not_ready";
+        return out.dump();
+    }
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    const auto request =
+        transaction_requests_.find(request_id);
+
+    if (!request.has_value()) {
+        out["ok"] = false;
+        out["code"] = "request_not_found";
+        return out.dump();
+    }
+
+    logos::LogosCaller target;
+    target.kind = logos::CallerKind::Module;
+    target.name = request->module_name;
+    target.instance = request->module_instance;
+
+    const auto target_key =
+        field::callerKey(target);
+
+    if (!target_key.has_value() ||
+        *target_key != request->caller_key) {
+        out["ok"] = false;
+        out["code"] = "request_identity_mismatch";
+        return out.dump();
+    }
+
+    const auto grant =
+        field::authorizedGrant(
+            target,
+            provider_state_.permissions(),
+            request->account_id,
+            field::Capability::TransactionPropose);
+
+    if (!grant.has_value()) {
+        out["ok"] = false;
+        out["code"] = "permission_denied";
+        return out.dump();
+    }
+
+    if (grant->account_kind !=
+        field::AccountKind::Public) {
+        out["ok"] = false;
+        out["code"] = "account_kind_mismatch";
+        return out.dump();
+    }
+
+    logos::CallError error;
+
+    const std::string lez_result =
+        modules().lez_core.transfer_public(
+            request->account_id,
+            request->destination_account_id,
+            request->amount_le16_hex,
+            &error);
+
+    if (!error.ok() || lez_result.empty()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    if (!transaction_requests_.remove(request_id)) {
+        out["ok"] = false;
+        out["code"] = "request_consume_failed";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["requestId"] = request_id;
+    out["lezResult"] = lez_result;
+
+    return out.dump();
+}
+
 std::string FieldWalletModule::approval_grant_request(
     const std::string& caller_key,
     const std::string& account_id,

@@ -1,6 +1,7 @@
 #ifndef FIELD_WALLET_MODULE_H
 #define FIELD_WALLET_MODULE_H
 
+#include <cstdint>
 #include <string>
 
 #include <logos_module_context.h>
@@ -43,6 +44,10 @@ public:
 
     /// List pending transaction proposals for Field Wallet UI.
     std::string approval_list_transaction_requests();
+
+    /// Execute one approved pending public transfer.
+    std::string approval_execute_public_transfer(
+        uint64_t request_id);
 
     /// Grant one capability from an authenticated pending dApp request.
     std::string approval_grant_request(
