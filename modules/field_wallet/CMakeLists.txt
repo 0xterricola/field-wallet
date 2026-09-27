@@ -26,6 +26,7 @@ logos_module(
         src/provider_access.h
         src/provider_validation.h
         src/lez_transfer_result.h
+        src/owned_account.h
         src/approval_authorization.h
         src/access_request_store.h
         src/transaction_request_store.h
