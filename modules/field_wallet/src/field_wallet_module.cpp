@@ -1,6 +1,7 @@
 #include "field_wallet_module.h"
 #include "provider_identity.h"
 #include "provider_access.h"
+#include "provider_validation.h"
 #include "provider_authorization.h"
 #include "provider_persistence.h"
 #include "approval_authorization.h"
@@ -255,8 +256,9 @@ std::string FieldWalletModule::provider_propose_public_transfer(
         return out.dump();
     }
 
-    if (destination_account_id.empty() ||
-        amount_le16_hex.empty()) {
+    if (!field::isAccountIdHex(account_id) ||
+        !field::isAccountIdHex(destination_account_id) ||
+        !field::isAmountLe16Hex(amount_le16_hex)) {
         out["ok"] = false;
         out["code"] = "invalid_request";
         return out.dump();
