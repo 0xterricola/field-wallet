@@ -600,6 +600,106 @@ std::string FieldWalletModule::provider_propose_public_to_private_transfer(
     return out.dump();
 }
 
+std::string FieldWalletModule::provider_propose_private_to_private_transfer(
+    const std::string& account_id,
+    const std::string& destination_account_id,
+    const std::string& amount_le16_hex)
+{
+    nlohmann::json out;
+
+    if (!provider_state_.ready()) {
+        out["ok"] = false;
+        out["code"] = "provider_not_ready";
+        return out.dump();
+    }
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    const auto grant =
+        field::authorizedGrant(
+            caller,
+            provider_state_.permissions(),
+            account_id,
+            field::Capability::TransactionPropose);
+
+    if (!grant.has_value()) {
+        out["ok"] = false;
+        out["code"] = "permission_denied";
+        return out.dump();
+    }
+
+    if (grant->account_kind !=
+        field::AccountKind::Private) {
+        out["ok"] = false;
+        out["code"] = "account_kind_mismatch";
+        return out.dump();
+    }
+
+    if (!field::isAccountIdHex(account_id) ||
+        !field::isAccountIdHex(
+            destination_account_id) ||
+        !field::isAmountLe16Hex(
+            amount_le16_hex)) {
+        out["ok"] = false;
+        out["code"] = "invalid_request";
+        return out.dump();
+    }
+
+    logos::CallError inventory_error;
+
+    const auto owned_accounts =
+        loadOwnedAccounts(
+            modules(),
+            inventory_error);
+
+    if (!inventory_error.ok()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    if (!owned_accounts.has_value()) {
+        out["ok"] = false;
+        out["code"] = "lez_result_invalid";
+        return out.dump();
+    }
+
+    const auto destination =
+        field::findOwnedAccount(
+            *owned_accounts,
+            destination_account_id);
+
+    if (!destination.has_value() ||
+        destination->account_kind !=
+            field::AccountKind::Private) {
+        out["ok"] = false;
+        out["code"] = "invalid_destination";
+        return out.dump();
+    }
+
+    const auto request_id =
+        transaction_requests_.
+            createPrivateToOwnedPrivateTransfer(
+                grant->caller_key,
+                caller.name,
+                caller.instance,
+                account_id,
+                destination_account_id,
+                amount_le16_hex);
+
+    if (!request_id.has_value()) {
+        out["ok"] = false;
+        out["code"] = "request_failed";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["requestId"] = *request_id;
+
+    return out.dump();
+}
+
 std::string FieldWalletModule::provider_get_transaction_status(
     uint64_t request_id)
 {
@@ -755,6 +855,10 @@ std::string FieldWalletModule::approval_list_transaction_requests()
 
         case field::TransactionRequestKind::PublicToOwnedPrivateNativeTransfer:
             type = "public_to_private_native_transfer";
+            break;
+
+        case field::TransactionRequestKind::PrivateToOwnedPrivateNativeTransfer:
+            type = "private_to_private_native_transfer";
             break;
         }
 
@@ -931,6 +1035,15 @@ std::string FieldWalletModule::approval_execute_transaction(
     case field::TransactionRequestKind::PublicToOwnedPrivateNativeTransfer:
         lez_result =
             modules().lez_core.transfer_shielded_owned(
+                request->account_id,
+                request->destination_account_id,
+                request->amount_le16_hex,
+                &error);
+        break;
+
+    case field::TransactionRequestKind::PrivateToOwnedPrivateNativeTransfer:
+        lez_result =
+            modules().lez_core.transfer_private_owned(
                 request->account_id,
                 request->destination_account_id,
                 request->amount_le16_hex,
