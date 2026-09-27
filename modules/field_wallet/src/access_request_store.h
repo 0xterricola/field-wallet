@@ -68,6 +68,26 @@ public:
         return it->second;
     }
 
+    bool removeCapability(
+        const std::string& caller_key,
+        Capability capability)
+    {
+        const auto it = requests_.find(caller_key);
+
+        if (it == requests_.end())
+            return false;
+
+        AccessRequest& request = it->second;
+
+        if (request.capabilities.erase(capability) == 0)
+            return false;
+
+        if (request.capabilities.empty())
+            requests_.erase(it);
+
+        return true;
+    }
+
     bool remove(
         const std::string& caller_key)
     {

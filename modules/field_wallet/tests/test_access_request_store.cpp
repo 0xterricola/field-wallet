@@ -146,3 +146,63 @@ LOGOS_TEST(access_request_store_rejects_empty_identity) {
             "",
             field::Capability::AccountIdentityRead));
 }
+
+LOGOS_TEST(access_request_store_removes_one_capability) {
+    field::AccessRequestStore store;
+
+    LOGOS_ASSERT_TRUE(
+        store.requestCapability(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_TRUE(
+        store.requestCapability(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            field::Capability::AccountBalanceRead));
+
+    LOGOS_ASSERT_TRUE(
+        store.removeCapability(
+            "module|5:app_a|0:",
+            field::Capability::AccountIdentityRead));
+
+    const auto request =
+        store.find("module|5:app_a|0:");
+
+    LOGOS_ASSERT_TRUE(request.has_value());
+
+    LOGOS_ASSERT_FALSE(
+        request->capabilities.contains(
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_TRUE(
+        request->capabilities.contains(
+            field::Capability::AccountBalanceRead));
+}
+
+LOGOS_TEST(access_request_store_removes_request_after_last_capability) {
+    field::AccessRequestStore store;
+
+    LOGOS_ASSERT_TRUE(
+        store.requestCapability(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_TRUE(
+        store.removeCapability(
+            "module|5:app_a|0:",
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_FALSE(
+        store.find(
+            "module|5:app_a|0:").has_value());
+
+    LOGOS_ASSERT_EQ(
+        store.size(),
+        static_cast<std::size_t>(0));
+}
