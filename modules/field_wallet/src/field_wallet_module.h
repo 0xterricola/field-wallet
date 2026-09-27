@@ -38,13 +38,6 @@ public:
         const std::string& account_kind,
         const std::string& capability);
 
-    /// Grant one capability after approval by Field Wallet.
-    std::string approval_grant_capability(
-        const std::string& module_name,
-        const std::string& module_instance,
-        const std::string& account_id,
-        const std::string& account_kind,
-        const std::string& capability);
 
     /// Revoke all capabilities for one approved dApp account binding.
     std::string approval_revoke(

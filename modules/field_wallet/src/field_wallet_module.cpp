@@ -286,17 +286,10 @@ std::string FieldWalletModule::approval_grant_request(
         return out.dump();
     }
 
-    if (!provider_state_.grantCapability(
-            caller_key,
-            account_id,
-            *kind,
-            *parsed_capability)) {
-        out["ok"] = false;
-        out["code"] = "permission_update_failed";
-        return out.dump();
-    }
+    field::AccessRequestStore candidate_requests =
+        access_requests_;
 
-    if (!access_requests_.removeCapability(
+    if (!candidate_requests.removeCapability(
             caller_key,
             *parsed_capability)) {
         out["ok"] = false;
@@ -304,88 +297,8 @@ std::string FieldWalletModule::approval_grant_request(
         return out.dump();
     }
 
-    out["ok"] = true;
-    out["moduleName"] = request->module_name;
-    out["moduleInstance"] = request->module_instance;
-    out["accountId"] = account_id;
-    out["accountKind"] =
-        field::accountKindName(*kind);
-    out["capability"] =
-        field::capabilityName(*parsed_capability);
-
-    return out.dump();
-}
-
-std::string FieldWalletModule::approval_grant_capability(
-    const std::string& module_name,
-    const std::string& module_instance,
-    const std::string& account_id,
-    const std::string& account_kind,
-    const std::string& capability)
-{
-    nlohmann::json out;
-
-    if (!provider_state_.ready()) {
-        out["ok"] = false;
-        out["code"] = "provider_not_ready";
-        return out.dump();
-    }
-
-    const logos::LogosCaller caller =
-        logos::currentCaller();
-
-    if (!field::isTrustedApprovalCaller(caller)) {
-        out["ok"] = false;
-        out["code"] = "approval_not_authorized";
-        return out.dump();
-    }
-
-    if (module_name.empty() || account_id.empty()) {
-        out["ok"] = false;
-        out["code"] = "invalid_request";
-        return out.dump();
-    }
-
-    const auto kind =
-        field::parseAccountKind(account_kind);
-
-    if (!kind.has_value()) {
-        out["ok"] = false;
-        out["code"] = "invalid_account_kind";
-        return out.dump();
-    }
-
-    const auto parsed_capability =
-        field::parseCapability(capability);
-
-    if (!parsed_capability.has_value()) {
-        out["ok"] = false;
-        out["code"] = "invalid_capability";
-        return out.dump();
-    }
-
-    logos::LogosCaller target;
-    target.kind = logos::CallerKind::Module;
-    target.name = module_name;
-    target.instance = module_instance;
-
-    if (!field::isDappCallerEligible(target)) {
-        out["ok"] = false;
-        out["code"] = "invalid_target";
-        return out.dump();
-    }
-
-    const auto target_key =
-        field::callerKey(target);
-
-    if (!target_key.has_value()) {
-        out["ok"] = false;
-        out["code"] = "invalid_target";
-        return out.dump();
-    }
-
     if (!provider_state_.grantCapability(
-            *target_key,
+            caller_key,
             account_id,
             *kind,
             *parsed_capability)) {
@@ -394,8 +307,12 @@ std::string FieldWalletModule::approval_grant_capability(
         return out.dump();
     }
 
+    access_requests_ =
+        std::move(candidate_requests);
+
     out["ok"] = true;
-    out["callerKey"] = *target_key;
+    out["moduleName"] = request->module_name;
+    out["moduleInstance"] = request->module_instance;
     out["accountId"] = account_id;
     out["accountKind"] =
         field::accountKindName(*kind);
