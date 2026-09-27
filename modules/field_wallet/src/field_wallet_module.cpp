@@ -2,6 +2,7 @@
 #include "provider_identity.h"
 #include "provider_access.h"
 #include "provider_validation.h"
+#include "lez_transfer_result.h"
 #include "provider_authorization.h"
 #include "provider_persistence.h"
 #include "approval_authorization.h"
@@ -459,6 +460,10 @@ std::string FieldWalletModule::provider_get_transaction_status(
         out["status"] = "pending";
         break;
 
+    case field::TransactionRequestStatus::Executing:
+        out["status"] = "executing";
+        break;
+
     case field::TransactionRequestStatus::Succeeded:
         out["status"] = "succeeded";
         out["lezResult"] = request->result;
@@ -466,6 +471,11 @@ std::string FieldWalletModule::provider_get_transaction_status(
 
     case field::TransactionRequestStatus::Rejected:
         out["status"] = "rejected";
+        break;
+
+    case field::TransactionRequestStatus::ExecutionFailed:
+        out["status"] = "execution_failed";
+        out["lezResult"] = request->result;
         break;
     }
 
@@ -701,6 +711,13 @@ std::string FieldWalletModule::approval_execute_transaction(
         return out.dump();
     }
 
+    if (!transaction_requests_.beginExecution(
+            request_id)) {
+        out["ok"] = false;
+        out["code"] = "request_not_pending";
+        return out.dump();
+    }
+
     logos::CallError error;
     std::string lez_result;
 
@@ -734,8 +751,45 @@ std::string FieldWalletModule::approval_execute_transaction(
     }
 
     if (!error.ok() || lez_result.empty()) {
+        transaction_requests_.markExecutionFailed(
+            request_id,
+            lez_result);
+
         out["ok"] = false;
-        out["code"] = "lez_error";
+        out["code"] = "lez_call_error";
+        out["requestId"] = request_id;
+        out["status"] = "execution_failed";
+        return out.dump();
+    }
+
+    const auto parsed =
+        field::parseLezTransferResult(
+            lez_result);
+
+    if (!parsed.has_value()) {
+        transaction_requests_.markExecutionFailed(
+            request_id,
+            lez_result);
+
+        out["ok"] = false;
+        out["code"] = "lez_result_invalid";
+        out["requestId"] = request_id;
+        out["status"] = "execution_failed";
+        out["lezResult"] = lez_result;
+        return out.dump();
+    }
+
+    if (!field::isSuccessfulLezTransferResult(
+            *parsed)) {
+        transaction_requests_.markExecutionFailed(
+            request_id,
+            lez_result);
+
+        out["ok"] = false;
+        out["code"] = "lez_transaction_failed";
+        out["requestId"] = request_id;
+        out["status"] = "execution_failed";
+        out["lezResult"] = lez_result;
         return out.dump();
     }
 
@@ -744,12 +798,14 @@ std::string FieldWalletModule::approval_execute_transaction(
             lez_result)) {
         out["ok"] = false;
         out["code"] = "request_state_failed";
+        out["requestId"] = request_id;
         return out.dump();
     }
 
     out["ok"] = true;
     out["requestId"] = request_id;
     out["status"] = "succeeded";
+    out["txHash"] = parsed->tx_hash;
     out["lezResult"] = lez_result;
 
     return out.dump();

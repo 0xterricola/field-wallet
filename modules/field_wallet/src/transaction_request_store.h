@@ -13,8 +13,10 @@ namespace field {
 
 enum class TransactionRequestStatus {
     Pending,
+    Executing,
     Succeeded,
-    Rejected
+    Rejected,
+    ExecutionFailed
 };
 
 enum class TransactionRequestKind {
@@ -166,9 +168,8 @@ public:
         return it->second;
     }
 
-    bool markSucceeded(
-        std::uint64_t id,
-        const std::string& result)
+    bool beginExecution(
+        std::uint64_t id)
     {
         const auto it = requests_.find(id);
 
@@ -179,7 +180,45 @@ public:
         }
 
         it->second.status =
+            TransactionRequestStatus::Executing;
+
+        return true;
+    }
+
+    bool markSucceeded(
+        std::uint64_t id,
+        const std::string& result)
+    {
+        const auto it = requests_.find(id);
+
+        if (it == requests_.end() ||
+            it->second.status !=
+                TransactionRequestStatus::Executing) {
+            return false;
+        }
+
+        it->second.status =
             TransactionRequestStatus::Succeeded;
+
+        it->second.result = result;
+
+        return true;
+    }
+
+    bool markExecutionFailed(
+        std::uint64_t id,
+        const std::string& result)
+    {
+        const auto it = requests_.find(id);
+
+        if (it == requests_.end() ||
+            it->second.status !=
+                TransactionRequestStatus::Executing) {
+            return false;
+        }
+
+        it->second.status =
+            TransactionRequestStatus::ExecutionFailed;
 
         it->second.result = result;
 

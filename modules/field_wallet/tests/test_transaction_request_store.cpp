@@ -124,6 +124,9 @@ LOGOS_TEST(transaction_request_store_marks_request_succeeded) {
     LOGOS_ASSERT_TRUE(id.has_value());
 
     LOGOS_ASSERT_TRUE(
+        store.beginExecution(*id));
+
+    LOGOS_ASSERT_TRUE(
         store.markSucceeded(
             *id,
             "lez-result"));
@@ -180,6 +183,9 @@ LOGOS_TEST(transaction_request_store_terminal_request_cannot_change_again) {
             "01");
 
     LOGOS_ASSERT_TRUE(id.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        store.beginExecution(*id));
 
     LOGOS_ASSERT_TRUE(
         store.markSucceeded(*id, "done"));
@@ -302,4 +308,95 @@ LOGOS_TEST(transaction_request_store_rejects_invalid_public_to_owned_private_req
             "public-account",
             "",
             "01").has_value());
+}
+
+LOGOS_TEST(transaction_request_store_execution_can_begin_only_once) {
+    field::TransactionRequestStore store;
+
+    const auto id =
+        store.createPublicTransfer(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            "account-a",
+            "account-b",
+            "01");
+
+    LOGOS_ASSERT_TRUE(id.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        store.beginExecution(*id));
+
+    LOGOS_ASSERT_FALSE(
+        store.beginExecution(*id));
+
+    const auto request =
+        store.find(*id);
+
+    LOGOS_ASSERT_TRUE(request.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        request->status ==
+        field::TransactionRequestStatus::Executing);
+}
+
+LOGOS_TEST(transaction_request_store_success_requires_execution) {
+    field::TransactionRequestStore store;
+
+    const auto id =
+        store.createPublicTransfer(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            "account-a",
+            "account-b",
+            "01");
+
+    LOGOS_ASSERT_TRUE(id.has_value());
+
+    LOGOS_ASSERT_FALSE(
+        store.markSucceeded(
+            *id,
+            "result"));
+}
+
+LOGOS_TEST(transaction_request_store_execution_failure_is_terminal) {
+    field::TransactionRequestStore store;
+
+    const auto id =
+        store.createPublicTransfer(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            "account-a",
+            "account-b",
+            "01");
+
+    LOGOS_ASSERT_TRUE(id.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        store.beginExecution(*id));
+
+    LOGOS_ASSERT_TRUE(
+        store.markExecutionFailed(
+            *id,
+            "lez failure"));
+
+    LOGOS_ASSERT_FALSE(
+        store.beginExecution(*id));
+
+    LOGOS_ASSERT_FALSE(
+        store.markSucceeded(
+            *id,
+            "late success"));
+
+    const auto request =
+        store.find(*id);
+
+    LOGOS_ASSERT_TRUE(request.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        request->status ==
+        field::TransactionRequestStatus::
+            ExecutionFailed);
 }
