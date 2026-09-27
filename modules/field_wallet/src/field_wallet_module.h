@@ -32,6 +32,12 @@ public:
         const std::string& account_kind,
         const std::string& capability);
 
+    /// Revoke all capabilities for one approved dApp account binding.
+    std::string approval_revoke(
+        const std::string& module_name,
+        const std::string& module_instance,
+        const std::string& account_id);
+
 protected:
     void onContextReady() override;
 

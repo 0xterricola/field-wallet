@@ -212,3 +212,63 @@ std::string FieldWalletModule::approval_grant_capability(
 
     return out.dump();
 }
+
+std::string FieldWalletModule::approval_revoke(
+    const std::string& module_name,
+    const std::string& module_instance,
+    const std::string& account_id)
+{
+    nlohmann::json out;
+
+    if (!provider_state_.ready()) {
+        out["ok"] = false;
+        out["code"] = "provider_not_ready";
+        return out.dump();
+    }
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    if (module_name.empty() || account_id.empty()) {
+        out["ok"] = false;
+        out["code"] = "invalid_request";
+        return out.dump();
+    }
+
+    logos::LogosCaller target;
+    target.kind = logos::CallerKind::Module;
+    target.name = module_name;
+    target.instance = module_instance;
+
+    if (!field::isDappCallerEligible(target)) {
+        out["ok"] = false;
+        out["code"] = "invalid_target";
+        return out.dump();
+    }
+
+    const auto target_key =
+        field::callerKey(target);
+
+    if (!target_key.has_value()) {
+        out["ok"] = false;
+        out["code"] = "invalid_target";
+        return out.dump();
+    }
+
+    if (!provider_state_.revokePermission(
+            *target_key,
+            account_id)) {
+        out["ok"] = false;
+        out["code"] = "permission_update_failed";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    return out.dump();
+}
