@@ -248,3 +248,58 @@ LOGOS_TEST(transaction_request_store_rejects_invalid_private_to_public_request) 
             "",
             "01").has_value());
 }
+
+LOGOS_TEST(transaction_request_store_creates_public_to_owned_private_transfer) {
+    field::TransactionRequestStore store;
+
+    const auto id =
+        store.createPublicToOwnedPrivateTransfer(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            "public-account",
+            "private-account",
+            "01");
+
+    LOGOS_ASSERT_TRUE(id.has_value());
+
+    const auto request =
+        store.find(*id);
+
+    LOGOS_ASSERT_TRUE(request.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        request->kind ==
+        field::TransactionRequestKind::
+            PublicToOwnedPrivateNativeTransfer);
+
+    LOGOS_ASSERT_TRUE(
+        request->account_kind ==
+        field::AccountKind::Public);
+
+    LOGOS_ASSERT_EQ(
+        request->destination_account_id,
+        std::string("private-account"));
+}
+
+LOGOS_TEST(transaction_request_store_rejects_invalid_public_to_owned_private_request) {
+    field::TransactionRequestStore store;
+
+    LOGOS_ASSERT_FALSE(
+        store.createPublicToOwnedPrivateTransfer(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            "",
+            "private-account",
+            "01").has_value());
+
+    LOGOS_ASSERT_FALSE(
+        store.createPublicToOwnedPrivateTransfer(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            "public-account",
+            "",
+            "01").has_value());
+}

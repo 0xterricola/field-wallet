@@ -19,7 +19,8 @@ enum class TransactionRequestStatus {
 
 enum class TransactionRequestKind {
     PublicNativeTransfer,
-    PrivateToPublicNativeTransfer
+    PrivateToPublicNativeTransfer,
+    PublicToOwnedPrivateNativeTransfer
 };
 
 struct TransactionRequest {
@@ -108,6 +109,43 @@ public:
         request.module_instance = module_instance;
         request.account_id = account_id;
         request.account_kind = AccountKind::Private;
+        request.destination_account_id =
+            destination_account_id;
+        request.amount_le16_hex = amount_le16_hex;
+
+        requests_.emplace(id, std::move(request));
+
+        return id;
+    }
+
+    std::optional<std::uint64_t> createPublicToOwnedPrivateTransfer(
+        const std::string& caller_key,
+        const std::string& module_name,
+        const std::string& module_instance,
+        const std::string& account_id,
+        const std::string& destination_account_id,
+        const std::string& amount_le16_hex)
+    {
+        if (caller_key.empty() ||
+            module_name.empty() ||
+            account_id.empty() ||
+            destination_account_id.empty() ||
+            amount_le16_hex.empty()) {
+            return std::nullopt;
+        }
+
+        const std::uint64_t id = next_id_++;
+
+        TransactionRequest request;
+        request.id = id;
+        request.kind =
+            TransactionRequestKind::
+                PublicToOwnedPrivateNativeTransfer;
+        request.caller_key = caller_key;
+        request.module_name = module_name;
+        request.module_instance = module_instance;
+        request.account_id = account_id;
+        request.account_kind = AccountKind::Public;
         request.destination_account_id =
             destination_account_id;
         request.amount_le16_hex = amount_le16_hex;
