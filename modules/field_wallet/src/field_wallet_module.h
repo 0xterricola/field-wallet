@@ -21,6 +21,9 @@ public:
     /// Diagnostic representation of the authenticated Logos caller.
     std::string caller_identity();
 
+    /// Read an approved account balance for the authenticated dApp caller.
+    std::string provider_get_balance(const std::string& account_id);
+
 protected:
     void onContextReady() override;
 

@@ -1,5 +1,6 @@
 #include "field_wallet_module.h"
 #include "provider_identity.h"
+#include "provider_access.h"
 
 #include <logos_caller.h>
 #include <nlohmann/json.hpp>
@@ -68,4 +69,57 @@ void FieldWalletModule::onContextReady() {
 
     provider_state_.initialize(
         instancePersistencePath());
+}
+
+std::string FieldWalletModule::provider_get_balance(
+    const std::string& account_id)
+{
+    nlohmann::json out;
+
+    if (!provider_state_.ready()) {
+        out["ok"] = false;
+        out["code"] = "provider_not_ready";
+        return out.dump();
+    }
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    const auto grant = field::authorizedGrant(
+        caller,
+        provider_state_.permissions(),
+        account_id,
+        field::Capability::AccountBalanceRead);
+
+    if (!grant.has_value()) {
+        out["ok"] = false;
+        out["code"] = "permission_denied";
+        return out.dump();
+    }
+
+    const bool is_public =
+        grant->account_kind ==
+        field::AccountKind::Public;
+
+    logos::CallError error;
+
+    const std::string balance =
+        modules().lez_core.get_balance(
+            account_id,
+            is_public,
+            &error);
+
+    if (!error.ok()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["accountId"] = account_id;
+    out["accountKind"] =
+        is_public ? "public" : "private";
+    out["balance"] = balance;
+
+    return out.dump();
 }
