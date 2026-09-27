@@ -39,6 +39,12 @@ public:
         const std::string& destination_account_id,
         const std::string& amount_le16_hex);
 
+    /// Propose a private-to-public native transfer for later wallet approval.
+    std::string provider_propose_private_to_public_transfer(
+        const std::string& account_id,
+        const std::string& destination_account_id,
+        const std::string& amount_le16_hex);
+
     /// Return the status of a transaction request owned by the authenticated dApp.
     std::string provider_get_transaction_status(
         uint64_t request_id);
@@ -55,6 +61,10 @@ public:
 
     /// Execute one approved pending public transfer.
     std::string approval_execute_public_transfer(
+        uint64_t request_id);
+
+    /// Execute one approved pending private-to-public transfer.
+    std::string approval_execute_private_to_public_transfer(
         uint64_t request_id);
 
     /// Grant one capability from an authenticated pending dApp request.
