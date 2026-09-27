@@ -28,6 +28,9 @@ public:
     /// Read an approved account balance for the authenticated dApp caller.
     std::string provider_get_balance(const std::string& account_id);
 
+    /// List pending dApp capability requests for Field Wallet UI.
+    std::string approval_list_requests();
+
     /// Grant one capability after approval by Field Wallet.
     std::string approval_grant_capability(
         const std::string& module_name,

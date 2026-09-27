@@ -179,6 +179,50 @@ std::string FieldWalletModule::provider_get_balance(
     return out.dump();
 }
 
+std::string FieldWalletModule::approval_list_requests()
+{
+    nlohmann::json out;
+
+    if (!provider_state_.ready()) {
+        out["ok"] = false;
+        out["code"] = "provider_not_ready";
+        return out.dump();
+    }
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    nlohmann::json requests =
+        nlohmann::json::array();
+
+    for (const auto& request : access_requests_.all()) {
+        nlohmann::json capabilities =
+            nlohmann::json::array();
+
+        for (const auto capability : request.capabilities)
+            capabilities.push_back(
+                field::capabilityName(capability));
+
+        requests.push_back({
+            {"callerKey", request.caller_key},
+            {"moduleName", request.module_name},
+            {"moduleInstance", request.module_instance},
+            {"capabilities", std::move(capabilities)},
+        });
+    }
+
+    out["ok"] = true;
+    out["requests"] = std::move(requests);
+
+    return out.dump();
+}
+
 std::string FieldWalletModule::approval_grant_capability(
     const std::string& module_name,
     const std::string& module_instance,
