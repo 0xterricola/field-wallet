@@ -24,6 +24,14 @@ public:
     /// Read an approved account balance for the authenticated dApp caller.
     std::string provider_get_balance(const std::string& account_id);
 
+    /// Grant one capability after approval by Field Wallet.
+    std::string approval_grant_capability(
+        const std::string& module_name,
+        const std::string& module_instance,
+        const std::string& account_id,
+        const std::string& account_kind,
+        const std::string& capability);
+
 protected:
     void onContextReady() override;
 

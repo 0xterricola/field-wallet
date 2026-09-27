@@ -1,6 +1,9 @@
 #include "field_wallet_module.h"
 #include "provider_identity.h"
 #include "provider_access.h"
+#include "provider_authorization.h"
+#include "provider_persistence.h"
+#include "approval_authorization.h"
 
 #include <logos_caller.h>
 #include <nlohmann/json.hpp>
@@ -109,17 +112,103 @@ std::string FieldWalletModule::provider_get_balance(
             is_public,
             &error);
 
-    if (!error.ok()) {
+    if (!error.ok() || balance.empty()) {
         out["ok"] = false;
         out["code"] = "lez_error";
         return out.dump();
     }
 
     out["ok"] = true;
+    out["balance"] = balance;
+
+    return out.dump();
+}
+
+std::string FieldWalletModule::approval_grant_capability(
+    const std::string& module_name,
+    const std::string& module_instance,
+    const std::string& account_id,
+    const std::string& account_kind,
+    const std::string& capability)
+{
+    nlohmann::json out;
+
+    if (!provider_state_.ready()) {
+        out["ok"] = false;
+        out["code"] = "provider_not_ready";
+        return out.dump();
+    }
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    if (module_name.empty() || account_id.empty()) {
+        out["ok"] = false;
+        out["code"] = "invalid_request";
+        return out.dump();
+    }
+
+    const auto kind =
+        field::parseAccountKind(account_kind);
+
+    if (!kind.has_value()) {
+        out["ok"] = false;
+        out["code"] = "invalid_account_kind";
+        return out.dump();
+    }
+
+    const auto parsed_capability =
+        field::parseCapability(capability);
+
+    if (!parsed_capability.has_value()) {
+        out["ok"] = false;
+        out["code"] = "invalid_capability";
+        return out.dump();
+    }
+
+    logos::LogosCaller target;
+    target.kind = logos::CallerKind::Module;
+    target.name = module_name;
+    target.instance = module_instance;
+
+    if (!field::isDappCallerEligible(target)) {
+        out["ok"] = false;
+        out["code"] = "invalid_target";
+        return out.dump();
+    }
+
+    const auto target_key =
+        field::callerKey(target);
+
+    if (!target_key.has_value()) {
+        out["ok"] = false;
+        out["code"] = "invalid_target";
+        return out.dump();
+    }
+
+    if (!provider_state_.grantCapability(
+            *target_key,
+            account_id,
+            *kind,
+            *parsed_capability)) {
+        out["ok"] = false;
+        out["code"] = "permission_update_failed";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["callerKey"] = *target_key;
     out["accountId"] = account_id;
     out["accountKind"] =
-        is_public ? "public" : "private";
-    out["balance"] = balance;
+        field::accountKindName(*kind);
+    out["capability"] =
+        field::capabilityName(*parsed_capability);
 
     return out.dump();
 }
