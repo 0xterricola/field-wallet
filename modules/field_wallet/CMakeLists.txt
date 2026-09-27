@@ -26,4 +26,5 @@ logos_module(
         src/provider_access.h
         src/approval_authorization.h
         src/access_request_store.h
+        src/transaction_request_store.h
 )
