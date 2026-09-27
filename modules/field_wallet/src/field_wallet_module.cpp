@@ -327,6 +327,50 @@ std::string FieldWalletModule::approval_list_requests()
     return out.dump();
 }
 
+std::string FieldWalletModule::approval_list_transaction_requests()
+{
+    nlohmann::json out;
+
+    if (!provider_state_.ready()) {
+        out["ok"] = false;
+        out["code"] = "provider_not_ready";
+        return out.dump();
+    }
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    nlohmann::json requests =
+        nlohmann::json::array();
+
+    for (const auto& request : transaction_requests_.all()) {
+        requests.push_back({
+            {"requestId", request.id},
+            {"type", "public_native_transfer"},
+            {"callerKey", request.caller_key},
+            {"moduleName", request.module_name},
+            {"moduleInstance", request.module_instance},
+            {"accountId", request.account_id},
+            {"accountKind", "public"},
+            {"destinationAccountId",
+             request.destination_account_id},
+            {"amountLe16Hex",
+             request.amount_le16_hex},
+        });
+    }
+
+    out["ok"] = true;
+    out["requests"] = std::move(requests);
+
+    return out.dump();
+}
+
 std::string FieldWalletModule::approval_grant_request(
     const std::string& caller_key,
     const std::string& account_id,

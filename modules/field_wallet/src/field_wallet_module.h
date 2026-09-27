@@ -41,6 +41,9 @@ public:
     /// List pending dApp capability requests for Field Wallet UI.
     std::string approval_list_requests();
 
+    /// List pending transaction proposals for Field Wallet UI.
+    std::string approval_list_transaction_requests();
+
     /// Grant one capability from an authenticated pending dApp request.
     std::string approval_grant_request(
         const std::string& caller_key,
