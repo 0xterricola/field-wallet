@@ -6,6 +6,7 @@
 #include <logos_module_context.h>
 #include "logos_sdk.h"
 #include "provider_state.h"
+#include "access_request_store.h"
 
 class FieldWalletModule : public LogosModuleContext {
 public:
@@ -20,6 +21,9 @@ public:
 
     /// Diagnostic representation of the authenticated Logos caller.
     std::string caller_identity();
+
+    /// Request one wallet capability for the authenticated dApp caller.
+    std::string provider_request_capability(const std::string& capability);
 
     /// Read an approved account balance for the authenticated dApp caller.
     std::string provider_get_balance(const std::string& account_id);
@@ -43,6 +47,7 @@ protected:
 
 private:
     field::ProviderState provider_state_;
+    field::AccessRequestStore access_requests_;
 };
 
 #endif // FIELD_WALLET_MODULE_H

@@ -74,6 +74,61 @@ void FieldWalletModule::onContextReady() {
         instancePersistencePath());
 }
 
+std::string FieldWalletModule::provider_request_capability(
+    const std::string& capability)
+{
+    nlohmann::json out;
+
+    if (!provider_state_.ready()) {
+        out["ok"] = false;
+        out["code"] = "provider_not_ready";
+        return out.dump();
+    }
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isDappCallerEligible(caller)) {
+        out["ok"] = false;
+        out["code"] = "caller_not_eligible";
+        return out.dump();
+    }
+
+    const auto caller_key =
+        field::callerKey(caller);
+
+    if (!caller_key.has_value()) {
+        out["ok"] = false;
+        out["code"] = "invalid_caller";
+        return out.dump();
+    }
+
+    const auto parsed_capability =
+        field::parseCapability(capability);
+
+    if (!parsed_capability.has_value()) {
+        out["ok"] = false;
+        out["code"] = "invalid_capability";
+        return out.dump();
+    }
+
+    if (!access_requests_.requestCapability(
+            *caller_key,
+            caller.name,
+            caller.instance,
+            *parsed_capability)) {
+        out["ok"] = false;
+        out["code"] = "request_failed";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["capability"] =
+        field::capabilityName(*parsed_capability);
+
+    return out.dump();
+}
+
 std::string FieldWalletModule::provider_get_balance(
     const std::string& account_id)
 {
