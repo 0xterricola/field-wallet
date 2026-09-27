@@ -24,4 +24,5 @@ logos_module(
         src/permission_repository.h
         src/provider_state.h
         src/provider_access.h
+        src/approval_authorization.h
 )
