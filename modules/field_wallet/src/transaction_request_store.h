@@ -11,6 +11,12 @@
 
 namespace field {
 
+enum class TransactionRequestStatus {
+    Pending,
+    Succeeded,
+    Rejected
+};
+
 struct TransactionRequest {
     std::uint64_t id = 0;
 
@@ -23,6 +29,11 @@ struct TransactionRequest {
 
     std::string destination_account_id;
     std::string amount_le16_hex;
+
+    TransactionRequestStatus status =
+        TransactionRequestStatus::Pending;
+
+    std::string result;
 };
 
 class TransactionRequestStore {
@@ -69,6 +80,42 @@ public:
             return std::nullopt;
 
         return it->second;
+    }
+
+    bool markSucceeded(
+        std::uint64_t id,
+        const std::string& result)
+    {
+        const auto it = requests_.find(id);
+
+        if (it == requests_.end() ||
+            it->second.status !=
+                TransactionRequestStatus::Pending) {
+            return false;
+        }
+
+        it->second.status =
+            TransactionRequestStatus::Succeeded;
+
+        it->second.result = result;
+
+        return true;
+    }
+
+    bool reject(std::uint64_t id)
+    {
+        const auto it = requests_.find(id);
+
+        if (it == requests_.end() ||
+            it->second.status !=
+                TransactionRequestStatus::Pending) {
+            return false;
+        }
+
+        it->second.status =
+            TransactionRequestStatus::Rejected;
+
+        return true;
     }
 
     bool remove(std::uint64_t id)

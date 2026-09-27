@@ -108,3 +108,84 @@ LOGOS_TEST(transaction_request_store_removes_request) {
     LOGOS_ASSERT_TRUE(store.remove(*id));
     LOGOS_ASSERT_FALSE(store.find(*id).has_value());
 }
+
+LOGOS_TEST(transaction_request_store_marks_request_succeeded) {
+    field::TransactionRequestStore store;
+
+    const auto id =
+        store.createPublicTransfer(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            "account-a",
+            "account-b",
+            "01");
+
+    LOGOS_ASSERT_TRUE(id.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        store.markSucceeded(
+            *id,
+            "lez-result"));
+
+    const auto request =
+        store.find(*id);
+
+    LOGOS_ASSERT_TRUE(request.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        request->status ==
+        field::TransactionRequestStatus::Succeeded);
+
+    LOGOS_ASSERT_EQ(
+        request->result,
+        std::string("lez-result"));
+}
+
+LOGOS_TEST(transaction_request_store_rejects_pending_request) {
+    field::TransactionRequestStore store;
+
+    const auto id =
+        store.createPublicTransfer(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            "account-a",
+            "account-b",
+            "01");
+
+    LOGOS_ASSERT_TRUE(id.has_value());
+    LOGOS_ASSERT_TRUE(store.reject(*id));
+
+    const auto request =
+        store.find(*id);
+
+    LOGOS_ASSERT_TRUE(request.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        request->status ==
+        field::TransactionRequestStatus::Rejected);
+}
+
+LOGOS_TEST(transaction_request_store_terminal_request_cannot_change_again) {
+    field::TransactionRequestStore store;
+
+    const auto id =
+        store.createPublicTransfer(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            "account-a",
+            "account-b",
+            "01");
+
+    LOGOS_ASSERT_TRUE(id.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        store.markSucceeded(*id, "done"));
+
+    LOGOS_ASSERT_FALSE(store.reject(*id));
+
+    LOGOS_ASSERT_FALSE(
+        store.markSucceeded(*id, "again"));
+}
