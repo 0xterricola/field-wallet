@@ -189,3 +189,62 @@ LOGOS_TEST(transaction_request_store_terminal_request_cannot_change_again) {
     LOGOS_ASSERT_FALSE(
         store.markSucceeded(*id, "again"));
 }
+
+LOGOS_TEST(transaction_request_store_creates_private_to_public_transfer) {
+    field::TransactionRequestStore store;
+
+    const auto id =
+        store.createPrivateToPublicTransfer(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            "private-account",
+            "public-account",
+            "01");
+
+    LOGOS_ASSERT_TRUE(id.has_value());
+
+    const auto request =
+        store.find(*id);
+
+    LOGOS_ASSERT_TRUE(request.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        request->kind ==
+        field::TransactionRequestKind::
+            PrivateToPublicNativeTransfer);
+
+    LOGOS_ASSERT_TRUE(
+        request->account_kind ==
+        field::AccountKind::Private);
+
+    LOGOS_ASSERT_EQ(
+        request->account_id,
+        std::string("private-account"));
+
+    LOGOS_ASSERT_EQ(
+        request->destination_account_id,
+        std::string("public-account"));
+}
+
+LOGOS_TEST(transaction_request_store_rejects_invalid_private_to_public_request) {
+    field::TransactionRequestStore store;
+
+    LOGOS_ASSERT_FALSE(
+        store.createPrivateToPublicTransfer(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            "",
+            "public-account",
+            "01").has_value());
+
+    LOGOS_ASSERT_FALSE(
+        store.createPrivateToPublicTransfer(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            "private-account",
+            "",
+            "01").has_value());
+}
