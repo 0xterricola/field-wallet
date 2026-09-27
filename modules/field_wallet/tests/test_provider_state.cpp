@@ -200,3 +200,76 @@ LOGOS_TEST(provider_state_failed_persistence_does_not_change_memory) {
         state.permissions().size(),
         static_cast<std::size_t>(0));
 }
+
+LOGOS_TEST(provider_state_grant_capability_merges_and_persists) {
+    const auto dir =
+        stateTestDir("grant-capability-merge");
+
+    field::ProviderState first;
+    first.initialize(dir);
+
+    LOGOS_ASSERT_TRUE(
+        first.grantCapability(
+            "module|5:app_a|0:",
+            "account-a",
+            field::AccountKind::Public,
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_TRUE(
+        first.grantCapability(
+            "module|5:app_a|0:",
+            "account-a",
+            field::AccountKind::Public,
+            field::Capability::AccountBalanceRead));
+
+    field::ProviderState second;
+    second.initialize(dir);
+
+    LOGOS_ASSERT_TRUE(second.ready());
+
+    LOGOS_ASSERT_TRUE(
+        second.permissions().allows(
+            "module|5:app_a|0:",
+            "account-a",
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_TRUE(
+        second.permissions().allows(
+            "module|5:app_a|0:",
+            "account-a",
+            field::Capability::AccountBalanceRead));
+}
+
+LOGOS_TEST(provider_state_grant_capability_rejects_kind_change) {
+    const auto dir =
+        stateTestDir("grant-kind-change");
+
+    field::ProviderState state;
+    state.initialize(dir);
+
+    LOGOS_ASSERT_TRUE(
+        state.grantCapability(
+            "module|5:app_a|0:",
+            "account-a",
+            field::AccountKind::Public,
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_FALSE(
+        state.grantCapability(
+            "module|5:app_a|0:",
+            "account-a",
+            field::AccountKind::Private,
+            field::Capability::AccountBalanceRead));
+
+    LOGOS_ASSERT_TRUE(
+        state.permissions().allows(
+            "module|5:app_a|0:",
+            "account-a",
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_FALSE(
+        state.permissions().allows(
+            "module|5:app_a|0:",
+            "account-a",
+            field::Capability::AccountBalanceRead));
+}

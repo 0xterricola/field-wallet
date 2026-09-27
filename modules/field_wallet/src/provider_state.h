@@ -85,6 +85,31 @@ public:
         return true;
     }
 
+    bool grantCapability(
+        const std::string& caller_key,
+        const std::string& account_id,
+        AccountKind account_kind,
+        Capability capability)
+    {
+        if (!ready() || !repository_.has_value())
+            return false;
+
+        PermissionStore candidate = store_;
+
+        if (!candidate.grantCapability(
+                caller_key,
+                account_id,
+                account_kind,
+                capability))
+            return false;
+
+        if (!repository_->save(candidate))
+            return false;
+
+        store_ = std::move(candidate);
+        return true;
+    }
+
     bool revokePermission(
         const std::string& caller_key,
         const std::string& account_id)
