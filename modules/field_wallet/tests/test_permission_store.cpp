@@ -88,3 +88,124 @@ LOGOS_TEST(permission_store_rejects_incomplete_grants) {
 
     LOGOS_ASSERT_EQ(store.size(), static_cast<std::size_t>(0));
 }
+
+LOGOS_TEST(permission_store_grant_capability_creates_grant) {
+    field::PermissionStore store;
+
+    LOGOS_ASSERT_TRUE(
+        store.grantCapability(
+            "module|5:app_a|0:",
+            "account-a",
+            field::AccountKind::Public,
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_TRUE(
+        store.allows(
+            "module|5:app_a|0:",
+            "account-a",
+            field::Capability::AccountIdentityRead));
+}
+
+LOGOS_TEST(permission_store_grant_capability_merges_capabilities) {
+    field::PermissionStore store;
+
+    LOGOS_ASSERT_TRUE(
+        store.grantCapability(
+            "module|5:app_a|0:",
+            "account-a",
+            field::AccountKind::Public,
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_TRUE(
+        store.grantCapability(
+            "module|5:app_a|0:",
+            "account-a",
+            field::AccountKind::Public,
+            field::Capability::AccountBalanceRead));
+
+    LOGOS_ASSERT_TRUE(
+        store.allows(
+            "module|5:app_a|0:",
+            "account-a",
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_TRUE(
+        store.allows(
+            "module|5:app_a|0:",
+            "account-a",
+            field::Capability::AccountBalanceRead));
+}
+
+LOGOS_TEST(permission_store_grant_capability_rejects_account_kind_change) {
+    field::PermissionStore store;
+
+    LOGOS_ASSERT_TRUE(
+        store.grantCapability(
+            "module|5:app_a|0:",
+            "account-a",
+            field::AccountKind::Public,
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_FALSE(
+        store.grantCapability(
+            "module|5:app_a|0:",
+            "account-a",
+            field::AccountKind::Private,
+            field::Capability::AccountBalanceRead));
+
+    const auto grant =
+        store.find(
+            "module|5:app_a|0:",
+            "account-a");
+
+    LOGOS_ASSERT_TRUE(grant.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        grant->account_kind ==
+        field::AccountKind::Public);
+
+    LOGOS_ASSERT_FALSE(
+        grant->allows(
+            field::Capability::AccountBalanceRead));
+}
+
+LOGOS_TEST(permission_store_explicit_reapproval_unrevokes_grant) {
+    field::PermissionStore store;
+
+    LOGOS_ASSERT_TRUE(
+        store.grantCapability(
+            "module|5:app_a|0:",
+            "account-a",
+            field::AccountKind::Public,
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_TRUE(
+        store.revoke(
+            "module|5:app_a|0:",
+            "account-a"));
+
+    LOGOS_ASSERT_FALSE(
+        store.allows(
+            "module|5:app_a|0:",
+            "account-a",
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_TRUE(
+        store.grantCapability(
+            "module|5:app_a|0:",
+            "account-a",
+            field::AccountKind::Public,
+            field::Capability::AccountBalanceRead));
+
+    LOGOS_ASSERT_TRUE(
+        store.allows(
+            "module|5:app_a|0:",
+            "account-a",
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_TRUE(
+        store.allows(
+            "module|5:app_a|0:",
+            "account-a",
+            field::Capability::AccountBalanceRead));
+}

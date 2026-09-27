@@ -23,6 +23,45 @@ public:
         return true;
     }
 
+    bool grantCapability(
+        const std::string& caller_key,
+        const std::string& account_id,
+        AccountKind account_kind,
+        Capability capability)
+    {
+        if (caller_key.empty() || account_id.empty())
+            return false;
+
+        const Key key{caller_key, account_id};
+        const auto it = grants_.find(key);
+
+        if (it == grants_.end()) {
+            PermissionGrant grant;
+            grant.caller_key = caller_key;
+            grant.account_id = account_id;
+            grant.account_kind = account_kind;
+            grant.capabilities.insert(capability);
+            grant.revoked = false;
+
+            grants_.emplace(key, std::move(grant));
+            return true;
+        }
+
+        PermissionGrant& grant = it->second;
+
+        // The same account ID must never silently change between
+        // public and private semantics.
+        if (grant.account_kind != account_kind)
+            return false;
+
+        grant.capabilities.insert(capability);
+
+        // An explicit new approval re-enables the grant.
+        grant.revoked = false;
+
+        return true;
+    }
+
     std::optional<PermissionGrant> find(
         const std::string& caller_key,
         const std::string& account_id) const
