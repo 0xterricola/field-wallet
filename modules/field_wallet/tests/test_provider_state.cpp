@@ -112,12 +112,14 @@ LOGOS_TEST(provider_state_corrupt_store_fails_closed) {
         state.permissions().size(),
         static_cast<std::size_t>(0));
 
-    LOGOS_ASSERT_FALSE(state.save());
+    LOGOS_ASSERT_FALSE(
+        state.putPermission(
+            stateTestGrant()));
 }
 
-LOGOS_TEST(provider_state_save_survives_reload) {
+LOGOS_TEST(provider_state_put_permission_persists_transactionally) {
     const auto dir =
-        stateTestDir("reload");
+        stateTestDir("transactional-put");
 
     field::ProviderState first;
     first.initialize(dir);
@@ -125,10 +127,8 @@ LOGOS_TEST(provider_state_save_survives_reload) {
     LOGOS_ASSERT_TRUE(first.ready());
 
     LOGOS_ASSERT_TRUE(
-        first.permissions().put(
+        first.putPermission(
             stateTestGrant()));
-
-    LOGOS_ASSERT_TRUE(first.save());
 
     field::ProviderState second;
     second.initialize(dir);
@@ -140,4 +140,63 @@ LOGOS_TEST(provider_state_save_survives_reload) {
             "module|5:app_a|0:",
             "account-a",
             field::Capability::AccountBalanceRead));
+}
+
+LOGOS_TEST(provider_state_revoke_permission_persists_transactionally) {
+    const auto dir =
+        stateTestDir("transactional-revoke");
+
+    field::ProviderState first;
+    first.initialize(dir);
+
+    LOGOS_ASSERT_TRUE(
+        first.putPermission(
+            stateTestGrant()));
+
+    LOGOS_ASSERT_TRUE(
+        first.revokePermission(
+            "module|5:app_a|0:",
+            "account-a"));
+
+    field::ProviderState second;
+    second.initialize(dir);
+
+    LOGOS_ASSERT_TRUE(second.ready());
+
+    LOGOS_ASSERT_FALSE(
+        second.permissions().allows(
+            "module|5:app_a|0:",
+            "account-a",
+            field::Capability::AccountBalanceRead));
+}
+
+LOGOS_TEST(provider_state_failed_persistence_does_not_change_memory) {
+    const auto root =
+        stateTestDir("failed-persistence");
+
+    const auto dir =
+        root / "state";
+
+    std::filesystem::create_directories(dir);
+
+    field::ProviderState state;
+    state.initialize(dir);
+
+    LOGOS_ASSERT_TRUE(state.ready());
+
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+
+    {
+        std::ofstream blocker(dir);
+        blocker << "not a directory";
+    }
+
+    LOGOS_ASSERT_FALSE(
+        state.putPermission(
+            stateTestGrant()));
+
+    LOGOS_ASSERT_EQ(
+        state.permissions().size(),
+        static_cast<std::size_t>(0));
 }

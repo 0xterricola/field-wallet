@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <string>
 
 namespace field {
 
@@ -62,21 +63,47 @@ public:
         return status_;
     }
 
-    PermissionStore& permissions()
-    {
-        return store_;
-    }
-
     const PermissionStore& permissions() const
     {
         return store_;
     }
 
-    bool save()
+    bool putPermission(const PermissionGrant& grant)
     {
-        return ready() &&
-               repository_.has_value() &&
-               repository_->save(store_);
+        if (!ready() || !repository_.has_value())
+            return false;
+
+        PermissionStore candidate = store_;
+
+        if (!candidate.put(grant))
+            return false;
+
+        if (!repository_->save(candidate))
+            return false;
+
+        store_ = std::move(candidate);
+        return true;
+    }
+
+    bool revokePermission(
+        const std::string& caller_key,
+        const std::string& account_id)
+    {
+        if (!ready() || !repository_.has_value())
+            return false;
+
+        PermissionStore candidate = store_;
+
+        if (!candidate.revoke(
+                caller_key,
+                account_id))
+            return false;
+
+        if (!repository_->save(candidate))
+            return false;
+
+        store_ = std::move(candidate);
+        return true;
     }
 
 private:
