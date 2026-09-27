@@ -3,6 +3,7 @@
 #include "provider_access.h"
 #include "provider_validation.h"
 #include "lez_transfer_result.h"
+#include "owned_account.h"
 #include "provider_authorization.h"
 #include "provider_persistence.h"
 #include "approval_authorization.h"
@@ -13,6 +14,26 @@
 FieldWalletModule::FieldWalletModule() = default;
 
 FieldWalletModule::~FieldWalletModule() = default;
+
+
+namespace {
+
+std::optional<std::vector<field::OwnedAccount>>
+loadOwnedAccounts(
+    LogosModules& logos_modules,
+    logos::CallError& error)
+{
+    const auto raw =
+        logos_modules.lez_core.list_accounts(
+            &error);
+
+    if (!error.ok())
+        return std::nullopt;
+
+    return field::parseOwnedAccounts(raw);
+}
+
+} // namespace
 
 std::string FieldWalletModule::name() const {
     return "field_wallet";
@@ -74,6 +95,139 @@ void FieldWalletModule::onContextReady() {
 
     provider_state_.initialize(
         instancePersistencePath());
+}
+
+std::string FieldWalletModule::wallet_list_accounts()
+{
+    nlohmann::json out;
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    logos::CallError error;
+
+    const auto owned_accounts =
+        loadOwnedAccounts(
+            modules(),
+            error);
+
+    if (!error.ok()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    if (!owned_accounts.has_value()) {
+        out["ok"] = false;
+        out["code"] = "lez_result_invalid";
+        return out.dump();
+    }
+
+    nlohmann::json accounts =
+        nlohmann::json::array();
+
+    for (const auto& account :
+         *owned_accounts) {
+        accounts.push_back({
+            {"accountId",
+             account.account_id},
+            {"accountKind",
+             field::accountKindName(
+                 account.account_kind)},
+        });
+    }
+
+    out["ok"] = true;
+    out["accounts"] =
+        std::move(accounts);
+
+    return out.dump();
+}
+
+std::string FieldWalletModule::wallet_create_public_account()
+{
+    nlohmann::json out;
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    logos::CallError error;
+
+    const std::string account_id =
+        modules().lez_core.create_account_public(
+            &error);
+
+    if (!error.ok() ||
+        account_id.empty()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    if (!field::isAccountIdHex(
+            account_id)) {
+        out["ok"] = false;
+        out["code"] = "lez_result_invalid";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["accountId"] = account_id;
+    out["accountKind"] = "public";
+
+    return out.dump();
+}
+
+std::string FieldWalletModule::wallet_create_private_account()
+{
+    nlohmann::json out;
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    logos::CallError error;
+
+    const std::string account_id =
+        modules().lez_core.create_account_private(
+            &error);
+
+    if (!error.ok() ||
+        account_id.empty()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    if (!field::isAccountIdHex(
+            account_id)) {
+        out["ok"] = false;
+        out["code"] = "lez_result_invalid";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["accountId"] = account_id;
+    out["accountKind"] = "private";
+
+    return out.dump();
 }
 
 std::string FieldWalletModule::provider_request_capability(
@@ -388,6 +542,40 @@ std::string FieldWalletModule::provider_propose_public_to_private_transfer(
         !field::isAmountLe16Hex(amount_le16_hex)) {
         out["ok"] = false;
         out["code"] = "invalid_request";
+        return out.dump();
+    }
+
+    logos::CallError inventory_error;
+
+    const auto owned_accounts =
+        loadOwnedAccounts(
+            modules(),
+            inventory_error);
+
+    if (!inventory_error.ok()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    if (!owned_accounts.has_value()) {
+        out["ok"] = false;
+        out["code"] = "lez_result_invalid";
+        return out.dump();
+    }
+
+    const auto destination =
+        field::findOwnedAccount(
+            *owned_accounts,
+            destination_account_id);
+
+    // Keep the dApp-facing failure generic so this
+    // endpoint is not an account-inventory oracle.
+    if (!destination.has_value() ||
+        destination->account_kind !=
+            field::AccountKind::Private) {
+        out["ok"] = false;
+        out["code"] = "invalid_destination";
         return out.dump();
     }
 
@@ -882,6 +1070,48 @@ std::string FieldWalletModule::approval_grant_request(
             *parsed_capability)) {
         out["ok"] = false;
         out["code"] = "request_consume_failed";
+        return out.dump();
+    }
+
+    logos::CallError inventory_error;
+
+    const auto owned_accounts =
+        loadOwnedAccounts(
+            modules(),
+            inventory_error);
+
+    if (!inventory_error.ok()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    if (!owned_accounts.has_value()) {
+        out["ok"] = false;
+        out["code"] = "lez_result_invalid";
+        return out.dump();
+    }
+
+    const auto owned_account =
+        field::findOwnedAccount(
+            *owned_accounts,
+            account_id);
+
+    if (!owned_account.has_value()) {
+        out["ok"] = false;
+        out["code"] = "account_not_owned";
+        return out.dump();
+    }
+
+    const auto requested_kind =
+        field::parseAccountKind(
+            account_kind);
+
+    if (!requested_kind.has_value() ||
+        owned_account->account_kind !=
+            *requested_kind) {
+        out["ok"] = false;
+        out["code"] = "account_kind_mismatch";
         return out.dump();
     }
 

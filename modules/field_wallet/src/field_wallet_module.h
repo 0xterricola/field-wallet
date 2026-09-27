@@ -24,6 +24,16 @@ public:
     /// Diagnostic representation of the authenticated Logos caller.
     std::string caller_identity();
 
+
+    /// List accounts owned by the underlying LEZ wallet for Field Wallet UI.
+    std::string wallet_list_accounts();
+
+    /// Create one public account in the underlying LEZ wallet.
+    std::string wallet_create_public_account();
+
+    /// Create one private account in the underlying LEZ wallet.
+    std::string wallet_create_private_account();
+
     /// Request one wallet capability for the authenticated dApp caller.
     std::string provider_request_capability(const std::string& capability);
 
