@@ -283,6 +283,67 @@ std::string FieldWalletModule::provider_propose_public_transfer(
     return out.dump();
 }
 
+std::string FieldWalletModule::provider_get_transaction_status(
+    uint64_t request_id)
+{
+    nlohmann::json out;
+
+    if (!provider_state_.ready()) {
+        out["ok"] = false;
+        out["code"] = "provider_not_ready";
+        return out.dump();
+    }
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isDappCallerEligible(caller)) {
+        out["ok"] = false;
+        out["code"] = "caller_not_eligible";
+        return out.dump();
+    }
+
+    const auto caller_key =
+        field::callerKey(caller);
+
+    if (!caller_key.has_value()) {
+        out["ok"] = false;
+        out["code"] = "caller_not_eligible";
+        return out.dump();
+    }
+
+    const auto request =
+        transaction_requests_.find(request_id);
+
+    // Do not reveal whether another dApp's request ID exists.
+    if (!request.has_value() ||
+        request->caller_key != *caller_key) {
+        out["ok"] = false;
+        out["code"] = "request_not_found";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["requestId"] = request_id;
+
+    switch (request->status) {
+    case field::TransactionRequestStatus::Pending:
+        out["status"] = "pending";
+        break;
+
+    case field::TransactionRequestStatus::Succeeded:
+        out["status"] = "succeeded";
+        out["lezResult"] = request->result;
+        break;
+
+    case field::TransactionRequestStatus::Rejected:
+        out["status"] = "rejected";
+        break;
+    }
+
+    return out.dump();
+}
+
 std::string FieldWalletModule::approval_list_requests()
 {
     nlohmann::json out;
@@ -350,6 +411,11 @@ std::string FieldWalletModule::approval_list_transaction_requests()
         nlohmann::json::array();
 
     for (const auto& request : transaction_requests_.all()) {
+        if (request.status !=
+            field::TransactionRequestStatus::Pending) {
+            continue;
+        }
+
         requests.push_back({
             {"requestId", request.id},
             {"type", "public_native_transfer"},
@@ -367,6 +433,55 @@ std::string FieldWalletModule::approval_list_transaction_requests()
 
     out["ok"] = true;
     out["requests"] = std::move(requests);
+
+    return out.dump();
+}
+
+std::string FieldWalletModule::approval_reject_transaction(
+    uint64_t request_id)
+{
+    nlohmann::json out;
+
+    if (!provider_state_.ready()) {
+        out["ok"] = false;
+        out["code"] = "provider_not_ready";
+        return out.dump();
+    }
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    const auto request =
+        transaction_requests_.find(request_id);
+
+    if (!request.has_value()) {
+        out["ok"] = false;
+        out["code"] = "request_not_found";
+        return out.dump();
+    }
+
+    if (request->status !=
+        field::TransactionRequestStatus::Pending) {
+        out["ok"] = false;
+        out["code"] = "request_not_pending";
+        return out.dump();
+    }
+
+    if (!transaction_requests_.reject(request_id)) {
+        out["ok"] = false;
+        out["code"] = "request_state_failed";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["requestId"] = request_id;
+    out["status"] = "rejected";
 
     return out.dump();
 }
@@ -397,6 +512,13 @@ std::string FieldWalletModule::approval_execute_public_transfer(
     if (!request.has_value()) {
         out["ok"] = false;
         out["code"] = "request_not_found";
+        return out.dump();
+    }
+
+    if (request->status !=
+        field::TransactionRequestStatus::Pending) {
+        out["ok"] = false;
+        out["code"] = "request_not_pending";
         return out.dump();
     }
 
@@ -450,14 +572,17 @@ std::string FieldWalletModule::approval_execute_public_transfer(
         return out.dump();
     }
 
-    if (!transaction_requests_.remove(request_id)) {
+    if (!transaction_requests_.markSucceeded(
+            request_id,
+            lez_result)) {
         out["ok"] = false;
-        out["code"] = "request_consume_failed";
+        out["code"] = "request_state_failed";
         return out.dump();
     }
 
     out["ok"] = true;
     out["requestId"] = request_id;
+    out["status"] = "succeeded";
     out["lezResult"] = lez_result;
 
     return out.dump();

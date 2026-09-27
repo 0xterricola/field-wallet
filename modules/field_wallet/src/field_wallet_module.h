@@ -39,11 +39,19 @@ public:
         const std::string& destination_account_id,
         const std::string& amount_le16_hex);
 
+    /// Return the status of a transaction request owned by the authenticated dApp.
+    std::string provider_get_transaction_status(
+        uint64_t request_id);
+
     /// List pending dApp capability requests for Field Wallet UI.
     std::string approval_list_requests();
 
     /// List pending transaction proposals for Field Wallet UI.
     std::string approval_list_transaction_requests();
+
+    /// Reject one pending transaction proposal.
+    std::string approval_reject_transaction(
+        uint64_t request_id);
 
     /// Execute one approved pending public transfer.
     std::string approval_execute_public_transfer(
