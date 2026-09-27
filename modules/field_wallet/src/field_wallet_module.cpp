@@ -59,3 +59,13 @@ std::string FieldWalletModule::caller_identity() {
 
     return out.dump();
 }
+
+void FieldWalletModule::onContextReady() {
+    if (!isContextReady() ||
+        instancePersistencePath().empty()) {
+        return;
+    }
+
+    provider_state_.initialize(
+        instancePersistencePath());
+}

@@ -22,4 +22,5 @@ logos_module(
         src/permission_store.h
         src/provider_persistence.h
         src/permission_repository.h
+        src/provider_state.h
 )

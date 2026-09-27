@@ -5,6 +5,7 @@
 
 #include <logos_module_context.h>
 #include "logos_sdk.h"
+#include "provider_state.h"
 
 class FieldWalletModule : public LogosModuleContext {
 public:
@@ -19,6 +20,12 @@ public:
 
     /// Diagnostic representation of the authenticated Logos caller.
     std::string caller_identity();
+
+protected:
+    void onContextReady() override;
+
+private:
+    field::ProviderState provider_state_;
 };
 
 #endif // FIELD_WALLET_MODULE_H

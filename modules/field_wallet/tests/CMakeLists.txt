@@ -13,6 +13,7 @@ logos_test(
         test_permission_store.cpp
         test_provider_persistence.cpp
         test_permission_repository.cpp
+        test_provider_state.cpp
     EXTRA_INCLUDES
         ../src
 )
