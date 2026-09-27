@@ -221,6 +221,68 @@ std::string FieldWalletModule::provider_get_balance(
     return out.dump();
 }
 
+std::string FieldWalletModule::provider_propose_public_transfer(
+    const std::string& account_id,
+    const std::string& destination_account_id,
+    const std::string& amount_le16_hex)
+{
+    nlohmann::json out;
+
+    if (!provider_state_.ready()) {
+        out["ok"] = false;
+        out["code"] = "provider_not_ready";
+        return out.dump();
+    }
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    const auto grant = field::authorizedGrant(
+        caller,
+        provider_state_.permissions(),
+        account_id,
+        field::Capability::TransactionPropose);
+
+    if (!grant.has_value()) {
+        out["ok"] = false;
+        out["code"] = "permission_denied";
+        return out.dump();
+    }
+
+    if (grant->account_kind != field::AccountKind::Public) {
+        out["ok"] = false;
+        out["code"] = "account_kind_mismatch";
+        return out.dump();
+    }
+
+    if (destination_account_id.empty() ||
+        amount_le16_hex.empty()) {
+        out["ok"] = false;
+        out["code"] = "invalid_request";
+        return out.dump();
+    }
+
+    const auto request_id =
+        transaction_requests_.createPublicTransfer(
+            grant->caller_key,
+            caller.name,
+            caller.instance,
+            account_id,
+            destination_account_id,
+            amount_le16_hex);
+
+    if (!request_id.has_value()) {
+        out["ok"] = false;
+        out["code"] = "request_failed";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["requestId"] = *request_id;
+
+    return out.dump();
+}
+
 std::string FieldWalletModule::approval_list_requests()
 {
     nlohmann::json out;
