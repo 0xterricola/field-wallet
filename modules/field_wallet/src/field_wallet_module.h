@@ -25,6 +25,9 @@ public:
     /// Request one wallet capability for the authenticated dApp caller.
     std::string provider_request_capability(const std::string& capability);
 
+    /// Return account identities explicitly approved for the authenticated dApp.
+    std::string provider_get_accounts();
+
     /// Read an approved account balance for the authenticated dApp caller.
     std::string provider_get_balance(const std::string& account_id);
 

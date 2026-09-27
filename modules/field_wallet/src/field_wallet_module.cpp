@@ -129,6 +129,48 @@ std::string FieldWalletModule::provider_request_capability(
     return out.dump();
 }
 
+std::string FieldWalletModule::provider_get_accounts()
+{
+    nlohmann::json out;
+
+    if (!provider_state_.ready()) {
+        out["ok"] = false;
+        out["code"] = "provider_not_ready";
+        return out.dump();
+    }
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isDappCallerEligible(caller)) {
+        out["ok"] = false;
+        out["code"] = "caller_not_eligible";
+        return out.dump();
+    }
+
+    const auto grants =
+        field::authorizedGrants(
+            caller,
+            provider_state_.permissions(),
+            field::Capability::AccountIdentityRead);
+
+    nlohmann::json accounts =
+        nlohmann::json::array();
+
+    for (const auto& grant : grants) {
+        accounts.push_back({
+            {"accountId", grant.account_id},
+            {"accountKind",
+             field::accountKindName(grant.account_kind)},
+        });
+    }
+
+    out["ok"] = true;
+    out["accounts"] = std::move(accounts);
+
+    return out.dump();
+}
+
 std::string FieldWalletModule::provider_get_balance(
     const std::string& account_id)
 {

@@ -155,3 +155,75 @@ LOGOS_TEST(provider_access_revoked_grant_is_not_authorized) {
             field::Capability::AccountBalanceRead)
             .has_value());
 }
+
+LOGOS_TEST(authorized_grants_returns_only_matching_caller_and_capability) {
+    field::PermissionStore store;
+
+    logos::LogosCaller caller;
+    caller.kind = logos::CallerKind::Module;
+    caller.name = "app_a";
+
+    const auto caller_key =
+        field::callerKey(caller);
+
+    LOGOS_ASSERT_TRUE(caller_key.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        store.grantCapability(
+            *caller_key,
+            "account-a",
+            field::AccountKind::Public,
+            field::Capability::AccountIdentityRead));
+
+    LOGOS_ASSERT_TRUE(
+        store.grantCapability(
+            *caller_key,
+            "account-b",
+            field::AccountKind::Private,
+            field::Capability::AccountBalanceRead));
+
+    logos::LogosCaller other;
+    other.kind = logos::CallerKind::Module;
+    other.name = "app_b";
+
+    const auto other_key =
+        field::callerKey(other);
+
+    LOGOS_ASSERT_TRUE(other_key.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        store.grantCapability(
+            *other_key,
+            "account-c",
+            field::AccountKind::Public,
+            field::Capability::AccountIdentityRead));
+
+    const auto grants =
+        field::authorizedGrants(
+            caller,
+            store,
+            field::Capability::AccountIdentityRead);
+
+    LOGOS_ASSERT_EQ(
+        grants.size(),
+        static_cast<std::size_t>(1));
+
+    LOGOS_ASSERT_EQ(
+        grants.front().account_id,
+        std::string("account-a"));
+}
+
+LOGOS_TEST(authorized_grants_rejects_non_dapp_caller) {
+    field::PermissionStore store;
+
+    logos::LogosCaller caller;
+    caller.kind = logos::CallerKind::Host;
+
+    const auto grants =
+        field::authorizedGrants(
+            caller,
+            store,
+            field::Capability::AccountIdentityRead);
+
+    LOGOS_ASSERT_TRUE(grants.empty());
+}

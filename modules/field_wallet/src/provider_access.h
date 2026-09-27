@@ -2,6 +2,7 @@
 #define FIELD_PROVIDER_ACCESS_H
 
 #include "permission_store.h"
+#include <vector>
 #include "provider_authorization.h"
 #include "provider_identity.h"
 
@@ -35,6 +36,31 @@ inline std::optional<PermissionGrant> authorizedGrant(
         return std::nullopt;
 
     return grant;
+}
+
+inline std::vector<PermissionGrant> authorizedGrants(
+    const logos::LogosCaller& caller,
+    const PermissionStore& store,
+    Capability capability)
+{
+    std::vector<PermissionGrant> result;
+
+    if (!isDappCallerEligible(caller))
+        return result;
+
+    const auto caller_key = callerKey(caller);
+
+    if (!caller_key.has_value())
+        return result;
+
+    for (const PermissionGrant& grant : store.all()) {
+        if (grant.caller_key == *caller_key &&
+            grant.allows(capability)) {
+            result.push_back(grant);
+        }
+    }
+
+    return result;
 }
 
 inline bool callerHasPermission(
