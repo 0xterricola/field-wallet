@@ -400,3 +400,47 @@ LOGOS_TEST(transaction_request_store_execution_failure_is_terminal) {
         field::TransactionRequestStatus::
             ExecutionFailed);
 }
+
+LOGOS_TEST(transaction_request_store_indeterminate_is_terminal) {
+    field::TransactionRequestStore store;
+
+    const auto id =
+        store.createPublicTransfer(
+            "module|5:app_a|0:",
+            "app_a",
+            "",
+            "account-a",
+            "account-b",
+            "01");
+
+    LOGOS_ASSERT_TRUE(id.has_value());
+    LOGOS_ASSERT_TRUE(
+        store.beginExecution(*id));
+
+    LOGOS_ASSERT_TRUE(
+        store.markIndeterminate(
+            *id,
+            "transport outcome unknown"));
+
+    LOGOS_ASSERT_FALSE(
+        store.beginExecution(*id));
+
+    LOGOS_ASSERT_FALSE(
+        store.markSucceeded(
+            *id,
+            "late result"));
+
+    LOGOS_ASSERT_FALSE(
+        store.markExecutionFailed(
+            *id,
+            "late failure"));
+
+    const auto request = store.find(*id);
+
+    LOGOS_ASSERT_TRUE(request.has_value());
+
+    LOGOS_ASSERT_TRUE(
+        request->status ==
+        field::TransactionRequestStatus::
+            Indeterminate);
+}

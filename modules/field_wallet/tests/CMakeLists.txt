@@ -21,6 +21,7 @@ logos_test(
         test_approval_authorization.cpp
         test_access_request_store.cpp
         test_transaction_request_store.cpp
+        test_transaction_state.cpp
     EXTRA_INCLUDES
         ../src
 )

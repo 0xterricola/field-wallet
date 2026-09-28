@@ -95,6 +95,9 @@ void FieldWalletModule::onContextReady() {
 
     provider_state_.initialize(
         instancePersistencePath());
+
+    transaction_state_.initialize(
+        instancePersistencePath());
 }
 
 std::string FieldWalletModule::wallet_list_accounts()
@@ -420,7 +423,7 @@ std::string FieldWalletModule::provider_propose_public_transfer(
     }
 
     const auto request_id =
-        transaction_requests_.createPublicTransfer(
+        transaction_state_.createPublicTransfer(
             grant->caller_key,
             caller.name,
             caller.instance,
@@ -483,7 +486,7 @@ std::string FieldWalletModule::provider_propose_private_to_public_transfer(
     }
 
     const auto request_id =
-        transaction_requests_.createPrivateToPublicTransfer(
+        transaction_state_.createPrivateToPublicTransfer(
             grant->caller_key,
             caller.name,
             caller.instance,
@@ -580,7 +583,7 @@ std::string FieldWalletModule::provider_propose_public_to_private_transfer(
     }
 
     const auto request_id =
-        transaction_requests_.createPublicToOwnedPrivateTransfer(
+        transaction_state_.createPublicToOwnedPrivateTransfer(
             grant->caller_key,
             caller.name,
             caller.instance,
@@ -679,7 +682,7 @@ std::string FieldWalletModule::provider_propose_private_to_private_transfer(
     }
 
     const auto request_id =
-        transaction_requests_.
+        transaction_state_.
             createPrivateToOwnedPrivateTransfer(
                 grant->caller_key,
                 caller.name,
@@ -730,7 +733,7 @@ std::string FieldWalletModule::provider_get_transaction_status(
     }
 
     const auto request =
-        transaction_requests_.find(request_id);
+        transaction_state_.find(request_id);
 
     // Do not reveal whether another dApp's request ID exists.
     if (!request.has_value() ||
@@ -763,6 +766,11 @@ std::string FieldWalletModule::provider_get_transaction_status(
 
     case field::TransactionRequestStatus::ExecutionFailed:
         out["status"] = "execution_failed";
+        out["lezResult"] = request->result;
+        break;
+
+    case field::TransactionRequestStatus::Indeterminate:
+        out["status"] = "indeterminate";
         out["lezResult"] = request->result;
         break;
     }
@@ -836,7 +844,7 @@ std::string FieldWalletModule::approval_list_transaction_requests()
     nlohmann::json requests =
         nlohmann::json::array();
 
-    for (const auto& request : transaction_requests_.all()) {
+    for (const auto& request : transaction_state_.all()) {
         if (request.status !=
             field::TransactionRequestStatus::Pending) {
             continue;
@@ -905,7 +913,7 @@ std::string FieldWalletModule::approval_reject_transaction(
     }
 
     const auto request =
-        transaction_requests_.find(request_id);
+        transaction_state_.find(request_id);
 
     if (!request.has_value()) {
         out["ok"] = false;
@@ -920,7 +928,7 @@ std::string FieldWalletModule::approval_reject_transaction(
         return out.dump();
     }
 
-    if (!transaction_requests_.reject(request_id)) {
+    if (!transaction_state_.reject(request_id)) {
         out["ok"] = false;
         out["code"] = "request_state_failed";
         return out.dump();
@@ -954,7 +962,7 @@ std::string FieldWalletModule::approval_execute_transaction(
     }
 
     const auto request =
-        transaction_requests_.find(request_id);
+        transaction_state_.find(request_id);
 
     if (!request.has_value()) {
         out["ok"] = false;
@@ -1003,7 +1011,7 @@ std::string FieldWalletModule::approval_execute_transaction(
         return out.dump();
     }
 
-    if (!transaction_requests_.beginExecution(
+    if (!transaction_state_.beginExecution(
             request_id)) {
         out["ok"] = false;
         out["code"] = "request_not_pending";
@@ -1052,14 +1060,14 @@ std::string FieldWalletModule::approval_execute_transaction(
     }
 
     if (!error.ok() || lez_result.empty()) {
-        transaction_requests_.markExecutionFailed(
+        transaction_state_.markIndeterminate(
             request_id,
             lez_result);
 
         out["ok"] = false;
-        out["code"] = "lez_call_error";
+        out["code"] = "execution_indeterminate";
         out["requestId"] = request_id;
-        out["status"] = "execution_failed";
+        out["status"] = "indeterminate";
         return out.dump();
     }
 
@@ -1068,21 +1076,21 @@ std::string FieldWalletModule::approval_execute_transaction(
             lez_result);
 
     if (!parsed.has_value()) {
-        transaction_requests_.markExecutionFailed(
+        transaction_state_.markIndeterminate(
             request_id,
             lez_result);
 
         out["ok"] = false;
-        out["code"] = "lez_result_invalid";
+        out["code"] = "execution_indeterminate";
         out["requestId"] = request_id;
-        out["status"] = "execution_failed";
+        out["status"] = "indeterminate";
         out["lezResult"] = lez_result;
         return out.dump();
     }
 
     if (!field::isSuccessfulLezTransferResult(
             *parsed)) {
-        transaction_requests_.markExecutionFailed(
+        transaction_state_.markExecutionFailed(
             request_id,
             lez_result);
 
@@ -1094,7 +1102,7 @@ std::string FieldWalletModule::approval_execute_transaction(
         return out.dump();
     }
 
-    if (!transaction_requests_.markSucceeded(
+    if (!transaction_state_.markSucceeded(
             request_id,
             lez_result)) {
         out["ok"] = false;

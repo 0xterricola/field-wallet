@@ -4,6 +4,7 @@
 #include "provider_permissions.h"
 
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <optional>
 #include <string>
@@ -16,7 +17,8 @@ enum class TransactionRequestStatus {
     Executing,
     Succeeded,
     Rejected,
-    ExecutionFailed
+    ExecutionFailed,
+    Indeterminate
 };
 
 enum class TransactionRequestKind {
@@ -263,6 +265,26 @@ public:
         return true;
     }
 
+    bool markIndeterminate(
+        std::uint64_t id,
+        const std::string& result)
+    {
+        const auto it = requests_.find(id);
+
+        if (it == requests_.end() ||
+            it->second.status !=
+                TransactionRequestStatus::Executing) {
+            return false;
+        }
+
+        it->second.status =
+            TransactionRequestStatus::Indeterminate;
+
+        it->second.result = result;
+
+        return true;
+    }
+
     bool reject(std::uint64_t id)
     {
         const auto it = requests_.find(id);
@@ -298,6 +320,47 @@ public:
             result.push_back(request);
 
         return result;
+    }
+
+    bool restore(
+        const TransactionRequest& request)
+    {
+        if (request.id == 0 ||
+            request.id ==
+                std::numeric_limits<std::uint64_t>::max() ||
+            request.caller_key.empty() ||
+            request.module_name.empty() ||
+            request.account_id.empty() ||
+            request.destination_account_id.empty() ||
+            request.amount_le16_hex.empty()) {
+            return false;
+        }
+
+        const bool source_should_be_public =
+            request.kind ==
+                TransactionRequestKind::PublicNativeTransfer ||
+            request.kind ==
+                TransactionRequestKind::
+                    PublicToOwnedPrivateNativeTransfer;
+
+        if (source_should_be_public !=
+            (request.account_kind ==
+                AccountKind::Public)) {
+            return false;
+        }
+
+        const auto [it, inserted] =
+            requests_.emplace(
+                request.id,
+                request);
+
+        if (!inserted)
+            return false;
+
+        if (request.id >= next_id_)
+            next_id_ = request.id + 1;
+
+        return true;
     }
 
 private:

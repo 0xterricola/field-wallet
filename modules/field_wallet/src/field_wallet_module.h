@@ -8,7 +8,7 @@
 #include "logos_sdk.h"
 #include "provider_state.h"
 #include "access_request_store.h"
-#include "transaction_request_store.h"
+#include "transaction_state.h"
 
 class FieldWalletModule : public LogosModuleContext {
 public:
@@ -105,7 +105,7 @@ protected:
 private:
     field::ProviderState provider_state_;
     field::AccessRequestStore access_requests_;
-    field::TransactionRequestStore transaction_requests_;
+    field::TransactionState transaction_state_;
 };
 
 #endif // FIELD_WALLET_MODULE_H

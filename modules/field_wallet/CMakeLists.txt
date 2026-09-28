@@ -30,4 +30,7 @@ logos_module(
         src/approval_authorization.h
         src/access_request_store.h
         src/transaction_request_store.h
+        src/transaction_request_persistence.h
+        src/transaction_request_repository.h
+        src/transaction_state.h
 )
