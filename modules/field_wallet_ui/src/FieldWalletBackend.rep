@@ -1,0 +1,7 @@
+class FieldWalletBackend
+{
+    PROP(bool ready READONLY)
+    PROP(QString buildLabel READONLY)
+
+    SLOT(QString ping())
+}

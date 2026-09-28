@@ -1,0 +1,31 @@
+{
+  "name": "field_wallet_ui",
+  "display_name": "Field Wallet",
+  "version": "0.1.0",
+  "type": "ui_qml",
+  "category": "wallet",
+  "description": "Field Wallet interface for Logos Execution Zone accounts, assets, permissions, and transaction approvals",
+  "author": "0xterricola",
+  "main": "field_wallet_ui_plugin",
+  "view": "qml/FieldWalletView.qml",
+  "dependencies": [],
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": [
+        "qt6.qtdeclarative",
+        "zstd",
+        "krb5",
+        "abseil-cpp"
+      ]
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
+  },
+  "icon": "src/icons/field_wallet.png"
+}
