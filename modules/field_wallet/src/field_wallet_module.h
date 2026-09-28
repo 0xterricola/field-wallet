@@ -28,6 +28,10 @@ public:
     /// List accounts owned by the underlying LEZ wallet for Field Wallet UI.
     std::string wallet_list_accounts();
 
+    /// Read the balance of one account owned by this wallet for Field Wallet UI.
+    std::string wallet_get_balance(
+        const std::string& account_id);
+
     /// Create one public account in the underlying LEZ wallet.
     std::string wallet_create_public_account();
 

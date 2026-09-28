@@ -153,6 +153,82 @@ std::string FieldWalletModule::wallet_list_accounts()
     return out.dump();
 }
 
+std::string FieldWalletModule::wallet_get_balance(
+    const std::string& account_id)
+{
+    nlohmann::json out;
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    if (!field::isAccountIdHex(account_id)) {
+        out["ok"] = false;
+        out["code"] = "invalid_account_id";
+        return out.dump();
+    }
+
+    logos::CallError error;
+
+    const auto owned_accounts =
+        loadOwnedAccounts(
+            modules(),
+            error);
+
+    if (!error.ok()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    if (!owned_accounts.has_value()) {
+        out["ok"] = false;
+        out["code"] = "lez_result_invalid";
+        return out.dump();
+    }
+
+    const auto account =
+        field::findOwnedAccount(
+            *owned_accounts,
+            account_id);
+
+    if (!account.has_value()) {
+        out["ok"] = false;
+        out["code"] = "account_not_owned";
+        return out.dump();
+    }
+
+    const bool is_public =
+        account->account_kind ==
+        field::AccountKind::Public;
+
+    const std::string balance =
+        modules().lez_core.get_balance(
+            account_id,
+            is_public,
+            &error);
+
+    if (!error.ok() || balance.empty()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["accountId"] = account_id;
+    out["accountKind"] =
+        field::accountKindName(
+            account->account_kind);
+    out["balance"] = balance;
+
+    return out.dump();
+}
+
 std::string FieldWalletModule::wallet_create_public_account()
 {
     nlohmann::json out;
