@@ -17,6 +17,7 @@ logos_test(
         test_provider_access.cpp
         test_provider_validation.cpp
         test_lez_transfer_result.cpp
+        test_token_transfer_codec.cpp
         test_owned_account.cpp
         test_approval_authorization.cpp
         test_access_request_store.cpp
