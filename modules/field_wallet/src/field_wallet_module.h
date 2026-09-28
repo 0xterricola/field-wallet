@@ -25,6 +25,15 @@ public:
     std::string caller_identity();
 
 
+    /// Return Field's trusted wallet lifecycle state.
+    std::string wallet_status();
+
+    /// Create Field's default LEZ wallet and return its recovery mnemonic.
+    std::string wallet_create(const std::string& password, const std::string& sequencer_addr);
+
+    /// Open an existing LEZ wallet for Field.
+    std::string wallet_open(const std::string& config_path, const std::string& storage_path);
+
     /// List accounts owned by the underlying LEZ wallet for Field Wallet UI.
     std::string wallet_list_accounts();
 
@@ -107,6 +116,8 @@ protected:
     void onContextReady() override;
 
 private:
+    bool wallet_open_ = false;
+
     field::ProviderState provider_state_;
     field::AccessRequestStore access_requests_;
     field::TransactionState transaction_state_;
