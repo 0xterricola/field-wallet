@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQml.Models
 
 Rectangle {
     id: root
@@ -121,6 +122,14 @@ Rectangle {
     readonly property bool hasAccount:
         liveAccountId.length > 0
 
+    readonly property bool accountsLoaded:
+        !!(backend && backend.accountsLoaded)
+    readonly property var accounts:
+        parseSavedWallets(backend && backend.accountsJson ? backend.accountsJson : "[]")
+    readonly property bool accountControlsEnabled:
+        walletState === "open" && backend && !operationPending
+        && !backend.walletBusy && !backend.walletSwitchBusy && !backend.accountBusy
+
     readonly property string liveAccountId:
         (backend && backend.accountId) ? backend.accountId : ""
 
@@ -198,6 +207,37 @@ Rectangle {
             .toUpperCase()
             + liveAccountKind.substring(1)
             + " account"
+    }
+
+    function selectedAccountName() {
+        for (var i = 0; i < accounts.length; ++i) {
+            if (accounts[i].accountId === liveAccountId)
+                return accounts[i].name || accountKindLabel()
+        }
+        return "No account selected"
+    }
+
+    function accountSummary() {
+        var privateCount = 0
+        for (var i = 0; i < accounts.length; ++i) {
+            if (accounts[i].accountKind === "private")
+                privateCount++
+        }
+        return (accounts.length - privateCount) + " public · " + privateCount + " private"
+    }
+
+    onPrivacyModeChanged: {
+        if (privacyMode) {
+            accountMenu.close()
+            addAccountMenu.close()
+            accountManager.close()
+        }
+    }
+
+    onStoragePathChanged: {
+        accountMenu.close()
+        addAccountMenu.close()
+        accountManager.close()
     }
 
     function refreshWallet() {
@@ -699,11 +739,127 @@ Rectangle {
                 anchors.margins: 22
 
                 ColumnLayout {
+                    RowLayout {
+                        spacing: 10
+
+                        Button {
+                            id: accountSelector
+                            objectName: "accountSelector"
+                            text: "Accounts (" + root.accounts.length + ")  ▾"
+                            enabled: root.accountControlsEnabled
+                            onClicked: accountMenu.open()
+                            contentItem: Text {
+                                text: parent.text
+                                color: root.primary
+                                font.pixelSize: 19
+                                font.weight: Font.DemiBold
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                color: accountSelector.hovered ? "#273039" : "transparent"
+                                radius: 8
+                            }
+
+                            Menu {
+                                id: accountMenu
+                                popupType: Popup.Item
+                                objectName: "accountMenu"
+                                y: accountSelector.height
+                                width: 310
+                                palette.window: root.panel
+                                palette.text: root.primary
+                                palette.windowText: root.primary
+                                palette.buttonText: root.primary
+                                palette.highlight: "#285C54"
+                                palette.highlightedText: root.primary
+
+                                Instantiator {
+                                    model: root.accounts
+                                    delegate: MenuItem {
+                                        required property var modelData
+                                        text: (modelData.name || "Account")
+                                            + " · " + (modelData.accountKind === "private" ? "Private" : "Public")
+                                            + " · " + root.shortAccount(modelData.accountId)
+                                        checkable: true
+                                        checked: modelData.accountId === root.liveAccountId
+                                        onTriggered: {
+                                            var selectedId = modelData.accountId
+                                            root.runOperation("Selecting account…", function() {
+                                                root.backend.selectAccount(selectedId)
+                                            })
+                                        }
+                                    }
+                                    onObjectAdded: function(index, object) { accountMenu.insertItem(index, object) }
+                                    onObjectRemoved: function(index, object) { accountMenu.removeItem(object) }
+                                }
+
+                                MenuSeparator {}
+                                MenuItem {
+                                    text: "Manage accounts…"
+                                    onTriggered: accountManager.open()
+                                }
+                                MenuItem {
+                                    text: "Refresh accounts"
+                                    onTriggered: root.runOperation("Refreshing accounts…", root.refreshWallet)
+                                }
+                            }
+                        }
+
+                        Button {
+                            id: addAccountButton
+                            objectName: "addAccountButton"
+                            text: "+ Add account"
+                            enabled: root.accountControlsEnabled && root.accountsLoaded
+                            opacity: enabled ? 1 : 0.45
+                            onClicked: addAccountMenu.open()
+                            contentItem: Text {
+                                text: parent.text
+                                color: root.cyan
+                                font.pixelSize: 12
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                radius: 10
+                                color: addAccountButton.hovered ? "#23453F" : "#18332F"
+                                border.width: 1
+                                border.color: "#285C54"
+                            }
+
+                            Menu {
+                                id: addAccountMenu
+                                popupType: Popup.Item
+                                objectName: "addAccountMenu"
+                                y: addAccountButton.height
+                                width: 220
+                                palette.window: root.panel
+                                palette.text: root.primary
+                                palette.windowText: root.primary
+                                palette.buttonText: root.primary
+                                palette.highlight: "#285C54"
+                                palette.highlightedText: root.primary
+
+                                MenuItem {
+                                    objectName: "createPrivateAccountAction"
+                                    text: "Create private account"
+                                    onTriggered: root.runOperation("Creating private account…", function() {
+                                        root.backend.createPrivateAccount()
+                                    })
+                                }
+                                MenuItem {
+                                    objectName: "createPublicAccountAction"
+                                    text: "Create public account"
+                                    onTriggered: root.runOperation("Creating public account…", function() {
+                                        root.backend.createPublicAccount()
+                                    })
+                                }
+                            }
+                        }
+                    }
                     Text {
-                        text: "Personal"
+                        text: root.selectedAccountName() + " · " + root.accountSummary()
                         color: root.primary
-                        font.pixelSize: 19
-                        font.weight: Font.DemiBold
+                        font.pixelSize: 12
                     }
                     Text {
                         text: root.shortAccount(root.liveAccountId)
@@ -2614,6 +2770,148 @@ Repeater {
         }
     }
 
+    Popup {
+        id: accountManager
+        objectName: "accountManager"
+        palette.window: root.panel
+        palette.button: "#18332F"
+        palette.buttonText: root.primary
+        palette.base: "#10151B"
+        palette.text: root.primary
+        parent: Overlay.overlay
+        width: Math.min(620, parent ? parent.width - 32 : 620)
+        height: Math.min(540, parent ? parent.height - 32 : 540)
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        padding: 20
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle {
+            radius: 18
+            color: root.panel
+            border.color: root.line
+        }
+        contentItem: ColumnLayout {
+            spacing: 12
+            RowLayout {
+                Layout.fillWidth: true
+                Text {
+                    Layout.fillWidth: true
+                    text: "Accounts in " + root.currentWalletLabel
+                    color: root.primary
+                    font.pixelSize: 20
+                    elide: Text.ElideRight
+                }
+                Button { text: "Done"; onClicked: accountManager.close() }
+            }
+            Text {
+                Layout.fillWidth: true
+                text: root.accountSummary() + ". Names and selection are saved for this wallet."
+                color: root.secondary
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+            }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: availableWidth
+                ListView {
+                    objectName: "managedAccountList"
+                    model: root.accounts
+                    spacing: 10
+                    delegate: Rectangle {
+                        required property var modelData
+                        width: ListView.view.width
+                        height: 112
+                        radius: 12
+                        color: "#171C22"
+                        border.color: modelData.accountId === root.liveAccountId ? root.cyan : root.line
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 4
+                            RowLayout {
+                                Layout.fillWidth: true
+                                TextField {
+                                    Layout.fillWidth: true
+                                    text: modelData.name || "Account"
+                                    maximumLength: 64
+                                    color: root.primary
+                                    selectByMouse: true
+                                    background: Rectangle { color: "#10151B"; radius: 6; border.color: root.line }
+                                    onEditingFinished: {
+                                        var newName = text.trim()
+                                        if (newName.length && newName !== modelData.name)
+                                            root.backend.renameAccount(modelData.accountId, newName)
+                                    }
+                                }
+                                Text {
+                                    text: modelData.accountKind === "private" ? "Private" : "Public"
+                                    color: modelData.accountKind === "private" ? root.violet : root.cyan
+                                    font.pixelSize: 12
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: modelData.accountId
+                                    elide: Text.ElideMiddle
+                                    color: root.secondary
+                                    font.family: "Monospace"
+                                    font.pixelSize: 11
+                                }
+                                Button {
+                                    text: "Copy"
+                                    onClicked: root.copyToClipboard(modelData.accountId)
+                                }
+                                Button {
+                                    text: modelData.accountId === root.liveAccountId ? "Selected" : "Use"
+                                    enabled: modelData.accountId !== root.liveAccountId && root.accountControlsEnabled
+                                    onClicked: {
+                                        var selectedId = modelData.accountId
+                                        accountManager.close()
+                                        root.runOperation("Selecting account…", function() {
+                                            root.backend.selectAccount(selectedId)
+                                        })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Button {
+                    text: "Create private account"
+                    enabled: root.accountControlsEnabled && root.accountsLoaded
+                    onClicked: {
+                        accountManager.close()
+                        root.runOperation("Creating private account…", function() { root.backend.createPrivateAccount() })
+                    }
+                }
+                Button {
+                    text: "Create public account"
+                    enabled: root.accountControlsEnabled && root.accountsLoaded
+                    onClicked: {
+                        accountManager.close()
+                        root.runOperation("Creating public account…", function() { root.backend.createPublicAccount() })
+                    }
+                }
+            }
+            Text {
+                visible: root.liveError.length > 0
+                Layout.fillWidth: true
+                text: root.liveError
+                color: "#e58b8b"
+                wrapMode: Text.WordWrap
+                font.pixelSize: 12
+            }
+        }
+    }
+
     Rectangle {
         visible: root.recoveryPhrase.length > 0
 
@@ -2708,9 +3006,11 @@ Repeater {
     }
 
     Rectangle {
+        objectName: "emptyWalletAccountPrompt"
         visible:
             root.walletState === "open"
-            && !root.hasAccount
+            && root.accountsLoaded
+            && root.accounts.length === 0
             && root.recoveryPhrase.length === 0
 
         anchors.fill: parent
@@ -2830,6 +3130,7 @@ Repeater {
         visible: root.operationPending
             || (root.backend && root.backend.walletBusy)
             || (root.backend && root.backend.walletSwitchBusy)
+                        || (root.backend && root.backend.accountBusy)
 
         anchors.fill: parent
         color: "#cc0b0d10"
@@ -2859,6 +3160,7 @@ Repeater {
                     running: root.operationPending
                         || (root.backend && root.backend.walletBusy)
                         || (root.backend && root.backend.walletSwitchBusy)
+                        || (root.backend && root.backend.accountBusy)
                 }
 
                 Rectangle {

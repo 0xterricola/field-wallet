@@ -4,21 +4,22 @@ Field is a desktop wallet and permissioned wallet-provider module for Logos Exec
 
 **Current stage: working wallet UI and provider backend, with the SDK and complete transaction experience still in development.** Field is being built toward [Logos λPrize LP-0021: LEZ Wallet and Provider SDK ($20,000)](https://github.com/logos-co/lambda-prize/blob/master/prizes/LP-0021.md).
 
-This feature inventory was reviewed against repository commit `42d0f17` on 2026-09-29. It distinguishes implemented code from preview screens and planned work; it does not claim a completed prize submission or newly verified end-to-end testnet operation.
+The initial repository review used commit `42d0f17` on 2026-09-29; account management has since been extended as described below. This inventory distinguishes implemented code and automated checks from live-network verification. It does not claim a completed prize submission or newly verified end-to-end testnet operation.
 
-## What works today
+## What is implemented
 
 ### Wallet interface
 
 - **Create local wallets:** create the default wallet or additional named wallets, using a password passed to LEZ and an optional sequencer URL. Creation displays the returned recovery phrase; continuing clears it from the UI.
 - **Manage multiple saved wallets:** choose, open, and switch between wallet vaults; edit their local display names and copy displayed account IDs. Switching saves and closes the previous wallet, opens the selected wallet, and attempts recovery of the previous wallet if opening fails.
 - **Open existing wallet files:** the macOS folder picker checks for `config.json` and `storage.json` in the selected directory. This opens existing storage; it is not seed-phrase restoration.
-- **Create a public or private account:** onboarding offers either account type when a wallet has no accounts. The core can create and list multiple accounts.
-- **Read an account balance:** the dashboard shows the first account returned by LEZ, its public/private kind, and its raw native balance. It is not a token portfolio or a total across accounts.
+- **Create public or private accounts:** use **+ Add account** on the dashboard, including when the wallet already has an account. Successful creation selects the returned account. Empty wallets also offer both types during onboarding. The UI flow is covered by simulated tests; live LEZ creation and restart persistence still need verification.
+- **Track and select accounts:** the **Accounts** menu lists the current wallet’s accounts; **Manage accounts…** shows their saved names, public/private types, addresses, and selected marker. Names and the last selection are stored separately for each wallet.
+- **Read an account balance:** the dashboard shows the selected account and its raw native balance. It is not a token portfolio or a total across accounts.
 - **Use Simple or Advanced presentation:** Advanced currently adds account/core diagnostics and wallet storage paths.
 - **Hide the interface with privacy mode:** use the bottom-right privacy toggle or **Cmd+L / Ctrl+L**. This is a visual privacy screen; it keeps the wallet open and does not provide authentication, encryption, or a wallet lock.
 
-**Multiple wallets and multiple accounts are different:** switching saved wallets works. Selecting among multiple accounts inside the same wallet is still planned; the dashboard currently selects the first account.
+**One wallet can contain multiple public and private accounts.** The wallet dropdown switches vaults; the Accounts controls manage accounts inside the selected vault. Public and private accounts are separate entries, not automatically paired wallets.
 
 ### Provider and transaction backend
 
@@ -78,7 +79,7 @@ Field delegates wallet creation/open/save/close, account operations, balance rea
 ### Storage and trust boundaries
 
 - LEZ's `wallet_dir()` determines the default wallet location. The default vault uses `config.json`, `storage.json`, and `statistics.json`; named vaults live under `wallets/<wallet-name>/` below that location.
-- Local display names and cached account identity are stored with Qt `QSettings`, keyed by wallet storage path. Renaming a display label does not rename the vault directory.
+- Wallet display names, per-account names, and the selected account identity are stored with Qt `QSettings`, scoped to the wallet storage path (and account ID for account names). These are local display preferences, not a backup of keys. Renaming a label does not rename the vault directory or change an account ID.
 - Provider grants live in `permissions.json` and transaction requests in `transactions.json` under Field's module-instance persistence directory. Pending capability requests are in memory only.
 - These provider stores currently belong to the **module instance**, not individual saved wallets. Switching vaults does not rebind or clear them. Per-vault permission and pending-request handling needs explicit implementation and integration tests.
 - Wallet-management and approval calls trust the authenticated `field_wallet_ui` module name. The current runtime integration does not bind that authority to an individual UI instance; see [approval authorization](modules/field_wallet/src/approval_authorization.h).
@@ -121,13 +122,13 @@ The UI flake includes Field core through `path:../field_wallet`; each module has
 
 The development wrapper supports local QML reloads, `DEV_QML_PATH` for an explicit QML directory, and `LOGOS_QML_HOT_RELOAD=0` to disable reloads. C++ changes require a rebuild and relaunch.
 
-These build instructions follow the upstream builder documentation and existing launcher layout. A fresh build was not validated during this review: sandbox restrictions prevented Nix cache/daemon access. Clean-checkout and both-platform verification remain outstanding.
+These commands follow the upstream builder documentation and existing launcher layout. The account-management UI plugin builds, but a fresh full development bundle currently fails because the pinned LEZ interface lacks `close`, which the existing Field core uses for wallet switching. The working local core/runtime was preserved for this UI update. Clean-checkout and both-platform verification remain outstanding.
 
 ### Current GUI walkthrough
 
 1. Launch Field. Choose an existing saved wallet or create a wallet with a password. Leaving the sequencer URL blank selects `https://testnet.lez.logos.co`.
 2. For a new wallet, record the recovery phrase, then select **I've backed it up** to continue. Seed restoration inside Field is not implemented yet.
-3. If the wallet has no accounts, choose **Create public account** or **Create private account**. The dashboard then reads the first account's native balance.
+3. Use **+ Add account → Create private account** (or **Create public account**). LEZ may initialize a new wallet with a public account already; that no longer hides account creation. After success, the dashboard selects the new account. Use **Accounts → Manage accounts…** to name, inspect, and select accounts.
 4. Use the wallet dropdown or **All wallets…** to switch wallets, create another named wallet, or edit a display name. New vault names allow 1–48 letters, digits, hyphens, or underscores; `default` is reserved.
 5. On macOS, opening an existing wallet folder requires `config.json` and `storage.json` directly inside it. The native folder picker is not implemented on other platforms yet.
 6. Use **Advanced** for the current diagnostics and the privacy button or **Cmd+L / Ctrl+L** to obscure the interface.
@@ -146,7 +147,7 @@ nix build '.#unit-tests' -L -o result-tests
 ./result-tests/bin/field_wallet_tests
 ```
 
-These tests exercise helpers and state logic. They do not establish end-to-end wallet creation/switching, user approvals, token support, or successful live-network transfers. This documentation review did not execute wallet operations or rerun the suite. No real-sequencer integration harness or CI workflow is currently tracked in the repository.
+The core tests exercise helpers and state logic. Additional [UI account tests](modules/field_wallet_ui/tests/README.md) compile the actual Qt backend against a simulated Logos transport and exercise the QML controls. They cover account creation/selection, per-wallet names and preferences, failure handling, and privacy-screen interaction without accessing real wallets. These checks do not establish live LEZ creation/persistence, transaction approvals, token support, or network transfers. No real-sequencer integration harness or CI workflow is currently tracked in the repository.
 
 Preserve the working multi-wallet selection/switching, privacy screen, and development launcher while adding functionality. Changes should stay in Field; use the official LEZ interfaces rather than duplicating or modifying upstream internals as part of Field work.
 
@@ -157,7 +158,7 @@ The authoritative target is the [full LP-0021 specification](https://github.com/
 | Required outcome | Repository evidence today | Remaining work / evidence |
 | --- | --- | --- |
 | Native and fungible-token assets on public/private accounts | Native account/balance APIs and four native-transfer proposal/execution paths; token codec helpers. | Working send/receive UI, fungible-token holdings/transfers, and end-to-end demonstrations for public/private paths. |
-| Multiple public/private accounts with easy switching | Core account creation/listing; working switching between saved wallets. | Account selection and management within each wallet. |
+| Multiple public/private accounts with easy switching | Core account APIs, saved-wallet switching, and per-wallet account creation/selection/naming controls with simulated tests. | Verify public/private creation and persistence end-to-end on LEZ, including restarts. |
 | Documented Provider SDK for access, balances/state, transfers and contract interactions | Permissioned module APIs and provider design notes. | Package/document the SDK, add the missing state/contract surface, and provide usable integration examples. |
 | Connection → account selection → approval before signing/submission | Backend request, grant, revoke, proposal, reject, and execute operations. | Wire real dApp prompts to those operations and show caller, account, asset, amount, destination, and decoded contract effects, including token approvals. |
 | Program verification and transaction costs | Approval artwork only; no registry or gas integration. | Show verification from a registry meeting or similar to LP-0023's source-verification requirements, and estimated/used gas when supported by testnet 0.3. |
@@ -191,7 +192,7 @@ The narrated walkthrough must demonstrate key/multi-account setup including a pr
 
 This sequence combines the original design goals with the implementation gaps and LP-0021 requirements. It is a proposed work order, not a committed delivery schedule.
 
-1. **Complete the native transaction experience.** Add account selection within a wallet, send/receive flows, live approval prompts, transaction outcomes/history, and vault-aware provider state. Preserve current wallet switching and privacy mode.
+1. **Complete the native transaction experience.** Validate account creation/persistence on LEZ, then add send/receive flows, live approval prompts, transaction outcomes/history, and vault-aware provider state. Preserve current wallet switching and privacy mode.
 2. **Make the provider usable by other developers.** Ship a documented SDK, connect/account-selection/grant/revoke flows, balance/state access, and a safe contract-proposal surface with Field-derived summaries.
 3. **Ship the reference apps early.** Implement the faucet and testimonial program/app through the same SDK and approval path; establish a submission identifier and begin authentic adoption tracking in parallel with development.
 4. **Complete asset and approval coverage.** Integrate fungible-token holdings/transfers for public/private accounts, token/contract effect decoding, program source verification, and gas display where available. Validate codec compatibility with testnet 0.3.

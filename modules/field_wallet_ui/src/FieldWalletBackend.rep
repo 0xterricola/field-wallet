@@ -9,6 +9,9 @@ class FieldWalletBackend
     PROP(QString recoveryPhrase READONLY)
     PROP(QString savedWalletsJson READONLY)
 
+    PROP(QString accountsJson READONLY)
+    PROP(bool accountsLoaded READONLY)
+    PROP(bool accountBusy READONLY)
     PROP(QString accountId READONLY)
     PROP(QString accountKind READONLY)
     PROP(QString balanceRaw READONLY)
@@ -28,6 +31,8 @@ class FieldWalletBackend
     SLOT(void switchWallet(QString configPath, QString storagePath))
     SLOT(void renameWallet(QString storagePath, QString displayName))
     SLOT(void clearRecoveryPhrase())
+    SLOT(void selectAccount(QString accountId))
+    SLOT(void renameAccount(QString accountId, QString displayName))
     SLOT(void createPublicAccount())
     SLOT(void createPrivateAccount())
 }

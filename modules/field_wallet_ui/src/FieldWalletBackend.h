@@ -49,12 +49,15 @@ public slots:
 
     void clearRecoveryPhrase() override;
 
+    void selectAccount(QString accountId) override;
+    void renameAccount(QString accountId, QString displayName) override;
     void createPublicAccount() override;
     void createPrivateAccount() override;
 
 private:
     void clearAccountData();
-    void loadAccountsAndBalance();
+    void loadAccountsAndBalance(const QString& preferredAccountId = QString());
+    void createAccount(bool isPrivate);
     void loadSavedWallets();
 
     LogosAPI* m_logosAPI;

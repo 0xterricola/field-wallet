@@ -50,6 +50,13 @@ QString walletMetadataKey(
             QString::fromLatin1(digest));
 }
 
+QString accountNameKey(const QString& storagePath, const QString& accountId)
+{
+    return walletMetadataKey(storagePath) + QStringLiteral("accountNames/") +
+        QString::fromLatin1(QCryptographicHash::hash(
+            accountId.toUtf8(), QCryptographicHash::Sha256).toHex());
+}
+
 void rememberWalletAccount(
     const QString& storagePath,
     const QString& accountId,
@@ -115,6 +122,7 @@ FieldWalletBackend::FieldWalletBackend(
     setSavedWalletsJson(QStringLiteral("[]"));
 
     clearAccountData();
+    setAccountBusy(false);
     setWalletError(QString());
     setWalletBusy(false);
     setWalletSwitchBusy(false);
@@ -136,6 +144,8 @@ QString FieldWalletBackend::ping()
 
 void FieldWalletBackend::clearAccountData()
 {
+    setAccountsLoaded(false);
+    setAccountsJson(QStringLiteral("[]"));
     setAccountId(QString());
     setAccountKind(QString());
     setBalanceRaw(QString());
@@ -216,6 +226,9 @@ void FieldWalletBackend::chooseWalletFolder()
 
 void FieldWalletBackend::refreshWallet()
 {
+    if (accountBusy())
+        return;
+
     setWalletError(QString());
 
     loadSavedWallets();
@@ -411,7 +424,8 @@ void FieldWalletBackend::loadSavedWallets()
                     QJsonDocument::Compact)));
 }
 
-void FieldWalletBackend::loadAccountsAndBalance()
+void FieldWalletBackend::loadAccountsAndBalance(
+    const QString& preferredAccountId)
 {
     clearAccountData();
 
@@ -443,37 +457,78 @@ void FieldWalletBackend::loadAccountsAndBalance()
         return;
     }
 
+    if (!accountsResult.value(QStringLiteral("accounts")).isArray()) {
+        setWalletError(QStringLiteral("accounts: invalid inventory"));
+        return;
+    }
+
     const QJsonArray accounts =
-        accountsResult
-            .value(
-                QStringLiteral("accounts"))
-            .toArray();
+        accountsResult.value(QStringLiteral("accounts")).toArray();
+
+    // Validate the entire inventory before allowing selection or creation.
+    for (const QJsonValue& value : accounts) {
+        const QJsonObject account = value.toObject();
+        const QString id = account.value(QStringLiteral("accountId")).toString();
+        const QString kind = account.value(QStringLiteral("accountKind")).toString();
+        if (id.isEmpty() || (kind != QStringLiteral("public") &&
+                             kind != QStringLiteral("private"))) {
+            setWalletError(QStringLiteral("accounts: malformed account"));
+            return;
+        }
+    }
+
+    QSettings settings;
+    QJsonArray namedAccounts;
+    int publicCount = 0;
+    int privateCount = 0;
+    for (const QJsonValue& value : accounts) {
+        QJsonObject account = value.toObject();
+        const QString id = account.value(QStringLiteral("accountId")).toString();
+        const bool isPrivate = account.value(QStringLiteral("accountKind")).toString() == QStringLiteral("private");
+        const int number = isPrivate ? ++privateCount : ++publicCount;
+        const QString key = accountNameKey(storagePath(), id);
+        QString name = settings.value(key).toString().trimmed();
+        if (name.isEmpty()) {
+            name = (isPrivate ? QStringLiteral("Private account %1") : QStringLiteral("Public account %1")).arg(number);
+            settings.setValue(key, name);
+        }
+        account[QStringLiteral("name")] = name;
+        namedAccounts.append(account);
+    }
+    setAccountsJson(QString::fromUtf8(
+        QJsonDocument(namedAccounts).toJson(QJsonDocument::Compact)));
+    setAccountsLoaded(true);
 
     if (accounts.isEmpty()) {
-        setWalletError(QString());
+        setWalletError(preferredAccountId.isEmpty()
+            ? QString()
+            : QStringLiteral("Created account is not in the wallet inventory yet. Refresh accounts before trying again."));
         return;
     }
 
-    const QJsonObject account =
-        accounts.at(0).toObject();
+    const QString rememberedId = settings.value(
+        walletMetadataKey(storagePath()) + QStringLiteral("accountId")).toString();
+    const QString wantedId = preferredAccountId.isEmpty()
+        ? rememberedId : preferredAccountId;
 
-    const QString accountId =
-        account.value(
-            QStringLiteral("accountId"))
-            .toString();
+    QJsonObject account = accounts.first().toObject();
+    bool preferredFound = false;
+    for (const QJsonValue& value : accounts) {
+        if (value.toObject().value(QStringLiteral("accountId")).toString() == wantedId) {
+            account = value.toObject();
+            preferredFound = true;
+            break;
+        }
+    }
 
-    const QString accountKind =
-        account.value(
-            QStringLiteral("accountKind"))
-            .toString();
-
-    if (accountId.isEmpty() ||
-        accountKind.isEmpty()) {
-        setWalletError(
-            QStringLiteral(
-                "accounts: malformed account"));
+    // Do not silently display another account after an explicit selection/create.
+    if (!preferredAccountId.isEmpty() && !preferredFound) {
+        setWalletError(QStringLiteral("Requested account is not in the wallet inventory. Refresh accounts before trying again."));
         return;
     }
+
+    const QString accountId = account.value(QStringLiteral("accountId")).toString();
+    const QString accountKind = account.value(QStringLiteral("accountKind")).toString();
 
     setAccountId(accountId);
     setAccountKind(accountKind);
@@ -482,6 +537,8 @@ void FieldWalletBackend::loadAccountsAndBalance()
         storagePath(),
         accountId,
         accountKind);
+
+    loadSavedWallets();
 
     const QString balanceRaw =
         m_logos
@@ -524,6 +581,9 @@ void FieldWalletBackend::createWallet(
     QString password,
     QString sequencerAddr)
 {
+    if (accountBusy())
+        return;
+
     setWalletError(QString());
     setWalletBusy(true);
 
@@ -604,6 +664,9 @@ void FieldWalletBackend::createNamedWallet(
     QString password,
     QString sequencerAddr)
 {
+    if (accountBusy())
+        return;
+
     setWalletError(QString());
     setWalletBusy(true);
 
@@ -713,6 +776,9 @@ void FieldWalletBackend::openWallet(
     QString configPath,
     QString storagePath)
 {
+    if (accountBusy())
+        return;
+
     setWalletError(QString());
 
     const QString raw =
@@ -764,6 +830,9 @@ void FieldWalletBackend::switchWallet(
     QString configPath,
     QString storagePath)
 {
+    if (accountBusy())
+        return;
+
     setWalletError(QString());
     setWalletSwitchBusy(true);
 
@@ -847,66 +916,126 @@ void FieldWalletBackend::clearRecoveryPhrase()
     refreshWallet();
 }
 
-void FieldWalletBackend::createPublicAccount()
+void FieldWalletBackend::selectAccount(QString selectedAccountId)
 {
-    setWalletError(QString());
-
-    const QString raw =
-        m_logos
-            ->field_wallet
-            .wallet_create_public_account();
-
-    QJsonObject result;
-
-    if (!parseObject(raw, result) ||
-        !result
-             .value(QStringLiteral("ok"))
-             .toBool()) {
-        setWalletError(
-            QStringLiteral("public account: ") +
-            (
-                parseObject(raw, result)
-                    ? resultCode(
-                          result,
-                          QStringLiteral(
-                              "unknown error"))
-                    : QStringLiteral(
-                          "invalid response")
-            ));
+    if (accountBusy() || walletBusy() || walletSwitchBusy() ||
+        walletState() != QStringLiteral("open") || !accountsLoaded()) {
         return;
     }
 
-    loadAccountsAndBalance();
+    const QJsonArray accounts = QJsonDocument::fromJson(
+        accountsJson().toUtf8()).array();
+    bool owned = false;
+    for (const QJsonValue& value : accounts) {
+        if (value.toObject().value(QStringLiteral("accountId")).toString() == selectedAccountId) {
+            owned = true;
+            break;
+        }
+    }
+    if (!owned) {
+        setWalletError(QStringLiteral("Account is not in the current wallet."));
+        return;
+    }
+
+    setAccountBusy(true);
+    setWalletError(QString());
+    loadAccountsAndBalance(selectedAccountId);
+    setAccountBusy(false);
+}
+
+void FieldWalletBackend::renameAccount(QString selectedAccountId, QString displayName)
+{
+    if (accountBusy() || walletBusy() || walletSwitchBusy() ||
+        walletState() != QStringLiteral("open") || !accountsLoaded()) {
+        return;
+    }
+    displayName = displayName.trimmed();
+    if (displayName.isEmpty() || displayName.size() > 64) {
+        setWalletError(QStringLiteral("Account names must contain 1 to 64 characters."));
+        return;
+    }
+    QJsonArray accounts = QJsonDocument::fromJson(accountsJson().toUtf8()).array();
+    for (qsizetype i = 0; i < accounts.size(); ++i) {
+        QJsonObject account = accounts.at(i).toObject();
+        if (account.value(QStringLiteral("accountId")).toString() != selectedAccountId)
+            continue;
+        QSettings settings;
+        settings.setValue(accountNameKey(storagePath(), selectedAccountId), displayName);
+        settings.sync();
+        if (settings.status() != QSettings::NoError) {
+            setWalletError(QStringLiteral("Could not save the account name."));
+            return;
+        }
+        account[QStringLiteral("name")] = displayName;
+        accounts.replace(i, account);
+        setAccountsJson(QString::fromUtf8(QJsonDocument(accounts).toJson(QJsonDocument::Compact)));
+        setWalletError(QString());
+        return;
+    }
+    setWalletError(QStringLiteral("Account is not in the current wallet."));
+}
+
+void FieldWalletBackend::createPublicAccount()
+{
+    createAccount(false);
 }
 
 void FieldWalletBackend::createPrivateAccount()
 {
-    setWalletError(QString());
+    createAccount(true);
+}
 
-    const QString raw =
-        m_logos
-            ->field_wallet
-            .wallet_create_private_account();
-
-    QJsonObject result;
-
-    if (!parseObject(raw, result) ||
-        !result
-             .value(QStringLiteral("ok"))
-             .toBool()) {
-        setWalletError(
-            QStringLiteral("private account: ") +
-            (
-                parseObject(raw, result)
-                    ? resultCode(
-                          result,
-                          QStringLiteral(
-                              "unknown error"))
-                    : QStringLiteral(
-                          "invalid response")
-            ));
+void FieldWalletBackend::createAccount(bool isPrivate)
+{
+    if (accountBusy() || walletBusy() || walletSwitchBusy() ||
+        walletState() != QStringLiteral("open") || !accountsLoaded()) {
         return;
     }
 
-    loadAccountsAndBalance();
+    setWalletError(QString());
+    setAccountBusy(true);
+    const QString expectedStorage = storagePath();
+    const QString kind = isPrivate ? QStringLiteral("private") : QStringLiteral("public");
+
+    auto completed = [this, expectedStorage, kind](logos::AsyncResult<QString> outcome) {
+        if (storagePath() != expectedStorage) {
+            clearAccountData();
+            setWalletError(QStringLiteral("Wallet changed during account creation. Refresh accounts before continuing."));
+            setAccountBusy(false);
+            return;
+        }
+        if (!outcome.ok()) {
+            setWalletError(kind + QStringLiteral(" account: request outcome is unknown. Refresh accounts before retrying. ") +
+                QString::fromStdString(outcome.error.message));
+            setAccountBusy(false);
+            return;
+        }
+
+        QJsonObject result;
+        if (!parseObject(outcome.value, result)) {
+            setWalletError(QStringLiteral("Account creation returned an invalid response. Refresh accounts before retrying."));
+        } else if (!result.value(QStringLiteral("ok")).toBool()) {
+            setWalletError(kind + QStringLiteral(" account: ") +
+                resultCode(result, QStringLiteral("unknown error")));
+        } else {
+            const QString createdId = result.value(QStringLiteral("accountId")).toString();
+            if (createdId.isEmpty() || result.value(QStringLiteral("accountKind")).toString() != kind) {
+                setWalletError(QStringLiteral("Account creation returned an invalid account. Refresh accounts before retrying."));
+            } else {
+                // Remember success even if the following inventory refresh fails.
+                rememberWalletAccount(storagePath(), createdId, kind);
+                // Select the returned account, not the first pre-existing public account.
+                loadAccountsAndBalance(createdId);
+            }
+        }
+        setAccountBusy(false);
+    };
+
+    if (isPrivate) {
+        m_logos->field_wallet.wallet_create_private_accountAsyncResult(
+            completed, Timeout(120000));
+    } else {
+        m_logos->field_wallet.wallet_create_public_accountAsyncResult(
+            completed, Timeout(120000));
+    }
 }
