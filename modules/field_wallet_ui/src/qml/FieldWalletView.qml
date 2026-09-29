@@ -19,6 +19,38 @@ Rectangle {
     property bool showOpenFields: false
     property bool showCreateAnother: false
     property bool showKeycardConnect: false
+    property bool privacyMode: false
+
+    Shortcut {
+        sequences: [
+            "Meta+L",
+            "Ctrl+L"
+        ]
+
+        context: Qt.ApplicationShortcut
+
+        onActivated:
+            root.togglePrivacyMode()
+    }
+
+    Keys.onShortcutOverride:
+        function(event) {
+            if (event.key === Qt.Key_L
+                    && ((event.modifiers & Qt.MetaModifier)
+                        || (event.modifiers & Qt.ControlModifier))) {
+                event.accepted = true
+            }
+        }
+
+    Keys.onPressed:
+        function(event) {
+            if (event.key === Qt.Key_L
+                    && ((event.modifiers & Qt.MetaModifier)
+                        || (event.modifiers & Qt.ControlModifier))) {
+                root.togglePrivacyMode()
+                event.accepted = true
+            }
+        }
 
     // "", "choose", "seed", "files"
     property string importMode: ""
@@ -29,6 +61,14 @@ Rectangle {
         clipboardProxy.selectAll()
         clipboardProxy.copy()
         clipboardProxy.text = ""
+    }
+
+    function togglePrivacyMode() {
+        privacyMode = !privacyMode
+
+        console.log(
+            "[Field] privacy mode:",
+            privacyMode ? "active" : "inactive")
     }
 
     function walletFileUrl(fileName) {
@@ -2952,4 +2992,188 @@ Repeater {
             }
         }
     }
+
+    // Global Field privacy screen.
+    //
+    // This obscures sensitive UI. It does not close
+    // the underlying LEZ wallet or destroy the current UI state.
+    Item {
+        id: globalPrivacyLayer
+
+        anchors.fill: parent
+        z: 10000
+
+        // Privacy screen.
+        Rectangle {
+            anchors.fill: parent
+            visible: root.privacyMode
+            color: root.color
+
+            Image {
+                anchors.fill: parent
+
+                source:
+                    "../assets/branding/field-hero.png"
+
+                fillMode: Image.PreserveAspectCrop
+                smooth: true
+                mipmap: true
+            }
+
+            // Consume all pointer interaction with the UI underneath.
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+            }
+        }
+
+        // Always-available privacy toggle.
+        Rectangle {
+            id: privacyButton
+
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.rightMargin: 14
+            anchors.bottomMargin: 14
+
+            width: 34
+            height: 34
+            radius: 10
+
+            color:
+                privacyMouse.containsMouse
+                    ? "#401B2229"
+                    : "transparent"
+
+            border.width:
+                privacyMouse.containsMouse
+                    ? 1
+                    : 0
+
+            border.color: "#48545E"
+
+            Canvas {
+                id: privacyIcon
+
+                anchors.centerIn: parent
+
+                width: 18
+                height: 20
+
+                onPaint: {
+                    var ctx = getContext("2d")
+
+                    ctx.clearRect(
+                        0,
+                        0,
+                        width,
+                        height)
+
+                    ctx.strokeStyle = "#B8C3CB"
+                    ctx.lineWidth = 1.5
+                    ctx.lineCap = "round"
+                    ctx.lineJoin = "round"
+
+                    // Padlock body.
+                    ctx.beginPath()
+                    ctx.rect(
+                        3.5,
+                        9,
+                        11,
+                        8.5)
+                    ctx.stroke()
+
+                    // Small keyhole.
+                    ctx.beginPath()
+                    ctx.arc(
+                        9,
+                        12.5,
+                        1,
+                        0,
+                        Math.PI * 2)
+                    ctx.stroke()
+
+                    ctx.beginPath()
+                    ctx.moveTo(
+                        9,
+                        13.5)
+                    ctx.lineTo(
+                        9,
+                        15.5)
+                    ctx.stroke()
+
+                    // Shackle.
+                    ctx.beginPath()
+
+                    if (root.privacyMode) {
+                        // Closed lock.
+                        ctx.moveTo(
+                            5.5,
+                            9)
+
+                        ctx.lineTo(
+                            5.5,
+                            6)
+
+                        ctx.bezierCurveTo(
+                            5.5,
+                            2.5,
+                            12.5,
+                            2.5,
+                            12.5,
+                            6)
+
+                        ctx.lineTo(
+                            12.5,
+                            9)
+                    } else {
+                        // Open lock.
+                        ctx.moveTo(
+                            5.5,
+                            9)
+
+                        ctx.lineTo(
+                            5.5,
+                            6)
+
+                        ctx.bezierCurveTo(
+                            5.5,
+                            2.5,
+                            12.5,
+                            2.5,
+                            12.5,
+                            6)
+
+                        ctx.lineTo(
+                            12.5,
+                            7)
+                    }
+
+                    ctx.stroke()
+                }
+
+                Connections {
+                    target: root
+
+                    function onPrivacyModeChanged() {
+                        privacyIcon.requestPaint()
+                    }
+                }
+            }
+
+            MouseArea {
+                id: privacyMouse
+
+                anchors.fill: parent
+                hoverEnabled: true
+
+                cursorShape:
+                    Qt.PointingHandCursor
+
+                onClicked:
+                    root.togglePrivacyMode()
+            }
+        }
+    }
+
 }
