@@ -31,8 +31,15 @@ public:
     /// Create Field's default LEZ wallet and return its recovery mnemonic.
     std::string wallet_create(const std::string& password, const std::string& sequencer_addr);
 
+    /// List Field-managed wallet vaults available on disk.
+    std::string wallet_list_saved();
+
+    /// Create another named Field wallet without replacing an existing wallet.
+    std::string wallet_create_named(const std::string& wallet_name, const std::string& password, const std::string& sequencer_addr);
+
     /// Open an existing LEZ wallet for Field.
     std::string wallet_open(const std::string& config_path, const std::string& storage_path);
+    std::string wallet_switch(const std::string& config_path, const std::string& storage_path);
 
     /// List accounts owned by the underlying LEZ wallet for Field Wallet UI.
     std::string wallet_list_accounts();
@@ -117,6 +124,8 @@ protected:
 
 private:
     bool wallet_open_ = false;
+    std::string current_config_path_;
+    std::string current_storage_path_;
 
     field::ProviderState provider_state_;
     field::AccessRequestStore access_requests_;

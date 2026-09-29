@@ -9,6 +9,7 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
+    field_wallet.url = "path:../field_wallet";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:

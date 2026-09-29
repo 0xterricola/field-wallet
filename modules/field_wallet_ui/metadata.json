@@ -8,7 +8,9 @@
   "author": "0xterricola",
   "main": "field_wallet_ui_plugin",
   "view": "qml/FieldWalletView.qml",
-  "dependencies": [],
+  "dependencies": [
+    "field_wallet"
+  ],
   "nix": {
     "packages": {
       "build": [],

@@ -10,8 +10,10 @@
 
 #include <logos_caller.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <vector>
 
 
 FieldWalletModule::FieldWalletModule() = default;
@@ -82,6 +84,70 @@ std::optional<WalletPaths> defaultWalletPaths(
         (root / "statistics.json").string();
 
     return paths;
+}
+
+WalletPaths walletPathsInDirectory(
+    const std::filesystem::path& root)
+{
+    WalletPaths paths;
+
+    paths.config =
+        (root / "config.json").string();
+
+    paths.storage =
+        (root / "storage.json").string();
+
+    paths.statistics =
+        (root / "statistics.json").string();
+
+    return paths;
+}
+
+std::filesystem::path managedWalletsRoot(
+    const WalletPaths& default_paths)
+{
+    return std::filesystem::path(
+        default_paths.config
+    ).parent_path() / "wallets";
+}
+
+bool isSafeWalletName(
+    const std::string& name)
+{
+    if (name.empty() ||
+        name.size() > 48 ||
+        name == "default") {
+        return false;
+    }
+
+    for (const unsigned char value : name) {
+        const bool alpha =
+            (value >= 'a' && value <= 'z') ||
+            (value >= 'A' && value <= 'Z');
+
+        const bool digit =
+            value >= '0' && value <= '9';
+
+        if (!alpha &&
+            !digit &&
+            value != '-' &&
+            value != '_') {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+WalletPaths namedWalletPaths(
+    const WalletPaths& default_paths,
+    const std::string& wallet_name)
+{
+    return walletPathsInDirectory(
+        managedWalletsRoot(
+            default_paths
+        ) / wallet_name
+    );
 }
 
 std::string statisticsPathFor(
@@ -277,8 +343,16 @@ std::string FieldWalletModule::wallet_status()
             paths->storage);
 
     out["ok"] = true;
-    out["configPath"] = paths->config;
-    out["storagePath"] = paths->storage;
+
+    if (wallet_open_ &&
+        !current_config_path_.empty() &&
+        !current_storage_path_.empty()) {
+        out["configPath"] = current_config_path_;
+        out["storagePath"] = current_storage_path_;
+    } else {
+        out["configPath"] = paths->config;
+        out["storagePath"] = paths->storage;
+    }
 
     if (wallet_open_) {
         out["state"] = "open";
@@ -291,6 +365,381 @@ std::string FieldWalletModule::wallet_status()
     } else {
         out["state"] = "incomplete";
     }
+
+    return out.dump();
+}
+
+std::string FieldWalletModule::wallet_list_saved()
+{
+    nlohmann::json out;
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    logos::CallError ready_error;
+
+    if (!lezDependencyReady(
+            modules(),
+            ready_error)) {
+        out["ok"] = false;
+        out["code"] = "dependency_not_ready";
+        return out.dump();
+    }
+
+    logos::CallError path_error;
+
+    const auto default_paths =
+        defaultWalletPaths(
+            modules(),
+            path_error);
+
+    if (!path_error.ok()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    if (!default_paths.has_value()) {
+        out["ok"] = false;
+        out["code"] = "wallet_dir_unavailable";
+        return out.dump();
+    }
+
+    nlohmann::json wallets =
+        nlohmann::json::array();
+
+    if (std::filesystem::exists(
+            default_paths->config) &&
+        std::filesystem::exists(
+            default_paths->storage)) {
+        wallets.push_back({
+            {"id", "default"},
+            {"name", "Default"},
+            {"configPath", default_paths->config},
+            {"storagePath", default_paths->storage}
+        });
+    }
+
+    const std::filesystem::path profiles_root =
+        managedWalletsRoot(
+            *default_paths);
+
+    std::error_code ec;
+
+    if (std::filesystem::exists(
+            profiles_root,
+            ec) &&
+        !ec) {
+        std::vector<std::filesystem::path>
+            directories;
+
+        std::filesystem::directory_iterator iterator(
+            profiles_root,
+            ec);
+
+        const std::filesystem::directory_iterator end;
+
+        while (!ec && iterator != end) {
+            const std::filesystem::directory_entry entry =
+                *iterator;
+
+            std::error_code status_error;
+
+            const std::filesystem::file_status status =
+                entry.symlink_status(
+                    status_error);
+
+            if (!status_error &&
+                std::filesystem::is_directory(
+                    status) &&
+                !std::filesystem::is_symlink(
+                    status)) {
+                directories.push_back(
+                    entry.path());
+            }
+
+            iterator.increment(ec);
+        }
+
+        if (ec) {
+            out["ok"] = false;
+            out["code"] =
+                "wallet_directory_read_failed";
+            return out.dump();
+        }
+
+        std::sort(
+            directories.begin(),
+            directories.end());
+
+        for (const auto& directory :
+             directories) {
+            const WalletPaths paths =
+                walletPathsInDirectory(
+                    directory);
+
+            if (!std::filesystem::exists(
+                    paths.config) ||
+                !std::filesystem::exists(
+                    paths.storage)) {
+                continue;
+            }
+
+            const std::string wallet_name =
+                directory
+                    .filename()
+                    .string();
+
+            wallets.push_back({
+                {"id", wallet_name},
+                {"name", wallet_name},
+                {"configPath", paths.config},
+                {"storagePath", paths.storage}
+            });
+        }
+    }
+
+    out["ok"] = true;
+    out["wallets"] = wallets;
+
+    return out.dump();
+}
+
+std::string FieldWalletModule::wallet_create_named(
+    const std::string& wallet_name,
+    const std::string& password,
+    const std::string& sequencer_addr)
+{
+    nlohmann::json out;
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    if (!isSafeWalletName(wallet_name)) {
+        out["ok"] = false;
+        out["code"] = "invalid_wallet_name";
+        return out.dump();
+    }
+
+    if (password.empty()) {
+        out["ok"] = false;
+        out["code"] = "password_required";
+        return out.dump();
+    }
+
+    logos::CallError ready_error;
+
+    if (!lezDependencyReady(
+            modules(),
+            ready_error)) {
+        out["ok"] = false;
+        out["code"] = "dependency_not_ready";
+        return out.dump();
+    }
+
+    logos::CallError path_error;
+
+    const auto default_paths =
+        defaultWalletPaths(
+            modules(),
+            path_error);
+
+    if (!path_error.ok()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    if (!default_paths.has_value()) {
+        out["ok"] = false;
+        out["code"] = "wallet_dir_unavailable";
+        return out.dump();
+    }
+
+    const WalletPaths paths =
+        namedWalletPaths(
+            *default_paths,
+            wallet_name);
+
+    if (std::filesystem::exists(paths.config) ||
+        std::filesystem::exists(paths.storage)) {
+        out["ok"] = false;
+        out["code"] = "wallet_already_exists";
+        out["walletId"] = wallet_name;
+        out["storagePath"] = paths.storage;
+        return out.dump();
+    }
+
+    if (!writeWalletConfig(
+            paths.config,
+            sequencer_addr)) {
+        out["ok"] = false;
+        out["code"] = "config_write_failed";
+        return out.dump();
+    }
+
+    const bool had_previous_wallet =
+        wallet_open_;
+
+    const std::string previous_config =
+        current_config_path_;
+
+    const std::string previous_storage =
+        current_storage_path_;
+
+    if (wallet_open_) {
+        logos::CallError save_error;
+
+        const int64_t save_result =
+            modules().lez_core.save(
+                &save_error);
+
+        if (!save_error.ok() ||
+            save_result != kWalletFfiSuccess) {
+            std::error_code ignored;
+            std::filesystem::remove(
+                paths.config,
+                ignored);
+
+            out["ok"] = false;
+            out["code"] =
+                "current_wallet_save_failed";
+            return out.dump();
+        }
+
+        logos::CallError close_error;
+
+        const int64_t close_result =
+            modules().lez_core.close(
+                &close_error);
+
+        if (!close_error.ok() ||
+            close_result != kWalletFfiSuccess) {
+            std::error_code ignored;
+            std::filesystem::remove(
+                paths.config,
+                ignored);
+
+            out["ok"] = false;
+            out["code"] =
+                "current_wallet_close_failed";
+            return out.dump();
+        }
+
+        wallet_open_ = false;
+        current_config_path_.clear();
+        current_storage_path_.clear();
+    }
+
+    logos::CallError create_error;
+
+    const std::string mnemonic =
+        modules().lez_core.create_new(
+            paths.config,
+            paths.storage,
+            paths.statistics,
+            password,
+            &create_error,
+            120000);
+
+    if (!create_error.ok() ||
+        mnemonic.empty()) {
+
+        std::error_code ignored;
+
+        std::filesystem::remove(
+            paths.config,
+            ignored);
+
+        std::filesystem::remove(
+            paths.storage,
+            ignored);
+
+        std::filesystem::remove(
+            paths.statistics,
+            ignored);
+
+        bool recovered = false;
+
+        if (had_previous_wallet &&
+            !previous_config.empty() &&
+            !previous_storage.empty()) {
+            logos::CallError recovery_error;
+
+            const int64_t recovery_result =
+                modules().lez_core.open(
+                    previous_config,
+                    previous_storage,
+                    statisticsPathFor(
+                        previous_storage),
+                    &recovery_error);
+
+            if (recovery_error.ok() &&
+                recovery_result ==
+                    kWalletFfiSuccess) {
+                wallet_open_ = true;
+                current_config_path_ =
+                    previous_config;
+                current_storage_path_ =
+                    previous_storage;
+                recovered = true;
+            }
+        }
+
+        out["ok"] = false;
+        out["code"] = "wallet_create_failed";
+        out["recoveredPreviousWallet"] =
+            recovered;
+        return out.dump();
+    }
+
+    wallet_open_ = true;
+    current_config_path_ = paths.config;
+    current_storage_path_ = paths.storage;
+
+    logos::CallError save_error;
+
+    const int64_t save_result =
+        modules().lez_core.save(
+            &save_error);
+
+    if (!save_error.ok() ||
+        save_result != kWalletFfiSuccess ||
+        !std::filesystem::exists(
+            paths.storage)) {
+        out["ok"] = false;
+        out["code"] = "wallet_save_failed";
+        out["walletOpen"] = true;
+        out["walletId"] = wallet_name;
+        out["configPath"] = paths.config;
+        out["storagePath"] = paths.storage;
+
+        // Creation already succeeded. Never discard
+        // recovery material just because persistence
+        // verification failed afterward.
+        out["mnemonic"] = mnemonic;
+
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["state"] = "open";
+    out["walletId"] = wallet_name;
+    out["mnemonic"] = mnemonic;
+    out["configPath"] = paths.config;
+    out["storagePath"] = paths.storage;
 
     return out.dump();
 }
@@ -380,7 +829,8 @@ std::string FieldWalletModule::wallet_create(
             paths->storage,
             paths->statistics,
             password,
-            &create_error);
+            &create_error,
+            120000);
 
     if (!create_error.ok() ||
         mnemonic.empty()) {
@@ -397,6 +847,8 @@ std::string FieldWalletModule::wallet_create(
     }
 
     wallet_open_ = true;
+    current_config_path_ = paths->config;
+    current_storage_path_ = paths->storage;
 
     logos::CallError save_error;
 
@@ -498,6 +950,150 @@ std::string FieldWalletModule::wallet_open(
     }
 
     wallet_open_ = true;
+    current_config_path_ = config_path;
+    current_storage_path_ = storage_path;
+
+    out["ok"] = true;
+    out["state"] = "open";
+    out["configPath"] = config_path;
+    out["storagePath"] = storage_path;
+
+    return out.dump();
+}
+
+std::string FieldWalletModule::wallet_switch(
+    const std::string& config_path,
+    const std::string& storage_path)
+{
+    nlohmann::json out;
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    if (config_path.empty() ||
+        storage_path.empty()) {
+        out["ok"] = false;
+        out["code"] = "wallet_paths_required";
+        return out.dump();
+    }
+
+    if (!std::filesystem::exists(config_path)) {
+        out["ok"] = false;
+        out["code"] = "config_not_found";
+        return out.dump();
+    }
+
+    if (!std::filesystem::exists(storage_path)) {
+        out["ok"] = false;
+        out["code"] = "storage_not_found";
+        return out.dump();
+    }
+
+    logos::CallError ready_error;
+
+    if (!lezDependencyReady(
+            modules(),
+            ready_error)) {
+        out["ok"] = false;
+        out["code"] = "dependency_not_ready";
+        return out.dump();
+    }
+
+    if (wallet_open_ &&
+        config_path == current_config_path_ &&
+        storage_path == current_storage_path_) {
+        out["ok"] = true;
+        out["state"] = "open";
+        out["configPath"] = current_config_path_;
+        out["storagePath"] = current_storage_path_;
+        return out.dump();
+    }
+
+    const std::string previous_config =
+        current_config_path_;
+    const std::string previous_storage =
+        current_storage_path_;
+
+    if (wallet_open_) {
+        logos::CallError save_error;
+
+        const int64_t save_result =
+            modules().lez_core.save(
+                &save_error);
+
+        if (!save_error.ok() ||
+            save_result != kWalletFfiSuccess) {
+            out["ok"] = false;
+            out["code"] = "wallet_save_failed";
+            return out.dump();
+        }
+
+        logos::CallError close_error;
+
+        const int64_t close_result =
+            modules().lez_core.close(
+                &close_error);
+
+        if (!close_error.ok() ||
+            close_result != kWalletFfiSuccess) {
+            out["ok"] = false;
+            out["code"] = "wallet_close_failed";
+            return out.dump();
+        }
+
+        wallet_open_ = false;
+        current_config_path_.clear();
+        current_storage_path_.clear();
+    }
+
+    logos::CallError open_error;
+
+    const int64_t open_result =
+        modules().lez_core.open(
+            config_path,
+            storage_path,
+            statisticsPathFor(storage_path),
+            &open_error);
+
+    if (!open_error.ok() ||
+        open_result != kWalletFfiSuccess) {
+        bool recovered = false;
+
+        if (!previous_config.empty() &&
+            !previous_storage.empty()) {
+            logos::CallError recovery_error;
+
+            const int64_t recovery_result =
+                modules().lez_core.open(
+                    previous_config,
+                    previous_storage,
+                    statisticsPathFor(previous_storage),
+                    &recovery_error);
+
+            if (recovery_error.ok() &&
+                recovery_result == kWalletFfiSuccess) {
+                wallet_open_ = true;
+                current_config_path_ = previous_config;
+                current_storage_path_ = previous_storage;
+                recovered = true;
+            }
+        }
+
+        out["ok"] = false;
+        out["code"] = "wallet_switch_open_failed";
+        out["recoveredPreviousWallet"] = recovered;
+        return out.dump();
+    }
+
+    wallet_open_ = true;
+    current_config_path_ = config_path;
+    current_storage_path_ = storage_path;
 
     out["ok"] = true;
     out["state"] = "open";
