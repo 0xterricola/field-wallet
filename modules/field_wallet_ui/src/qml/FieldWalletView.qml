@@ -13,12 +13,10 @@ Rectangle {
 
     readonly property var backend: logos ? logos.module("field_wallet_ui") : null
     property bool advancedMode: false
-    property bool walletChooserVisible: false
     readonly property string currentWalletLabel:
         activeWalletName()
     property bool approvalVisible: false
     property bool showOpenFields: false
-    property bool showCreateAnother: false
     property bool showKeycardConnect: false
     property bool privacyMode: false
 
@@ -128,7 +126,7 @@ Rectangle {
         parseSavedWallets(backend && backend.accountsJson ? backend.accountsJson : "[]")
     readonly property bool accountControlsEnabled:
         walletState === "open" && backend && !operationPending
-        && !backend.walletBusy && !backend.walletSwitchBusy && !backend.accountBusy
+        && !backend.walletBusy && !backend.accountBusy
 
     readonly property string liveAccountId:
         (backend && backend.accountId) ? backend.accountId : ""
@@ -153,10 +151,10 @@ Rectangle {
     function activeWalletName() {
         for (var i = 0; i < savedWallets.length; ++i) {
             if (walletMatches(savedWallets[i]))
-                return savedWallets[i].name || "Default"
+                return savedWallets[i].name || "LEZ Wallet"
         }
 
-        return "Default"
+        return "LEZ Wallet"
     }
 
     function parseSavedWallets(raw) {
@@ -310,7 +308,7 @@ Rectangle {
         visible: root.walletState === "open"
         anchors.fill: parent
         source: Qt.resolvedUrl(
-            "../assets/branding/field-hero.png")
+            "assets/branding/field-hero.png")
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
         cache: true
@@ -402,235 +400,27 @@ Rectangle {
             Rectangle {
                 id: walletSelector
 
-                Layout.preferredWidth:
-                    walletSelectorText.implicitWidth + 34
-                Layout.preferredHeight: 38
+                Layout.preferredWidth: 118
+                Layout.preferredHeight: 40
 
-                radius: 19
-                color: walletSelectorMouse.containsMouse
-                    ? "#273039"
-                    : "#C9171C22"
+                radius: 20
+                color: root.panel
 
                 border.width: 1
-                border.color: walletSelectorMouse.containsMouse
-                    ? "#40515F"
-                    : root.line
-
-                Behavior on color {
-                    ColorAnimation { duration: 100 }
-                }
+                border.color: root.line
 
                 Text {
-                    id: walletSelectorText
                     anchors.centerIn: parent
 
-                    text: root.currentWalletLabel + "  ▾"
+                    text: root.currentWalletLabel
                     color: root.primary
-                    font.pixelSize: 13
+
+                    font.pixelSize: 12
                     font.weight: Font.Medium
                 }
-
-                MouseArea {
-                    id: walletSelectorMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-
-                    onClicked: walletMenu.open()
-                }
             }
 
-            Popup {
-                id: walletMenu
 
-                parent: Overlay.overlay
-                width: 220
-                height: walletMenuColumn.implicitHeight + 16
-                padding: 8
-
-                x: {
-                    var overlay = Overlay.overlay
-
-                    if (!overlay)
-                        return 8
-
-                    var point =
-                        walletSelector.mapToItem(
-                            overlay,
-                            walletSelector.width - width,
-                            0)
-
-                    return Math.max(
-                        8,
-                        Math.min(
-                            overlay.width - width - 8,
-                            point.x))
-                }
-
-                y: {
-                    var overlay = Overlay.overlay
-
-                    if (!overlay)
-                        return 0
-
-                    return walletSelector.mapToItem(
-                        overlay,
-                        0,
-                        walletSelector.height + 8).y
-                }
-
-                modal: false
-                focus: true
-
-                closePolicy:
-                    Popup.CloseOnEscape
-                    | Popup.CloseOnPressOutside
-
-                background: Rectangle {
-                    radius: 12
-                    color: "#F015191E"
-                    border.width: 1
-                    border.color: "#34404A"
-                }
-
-                contentItem: Column {
-                    id: walletMenuColumn
-                    spacing: 2
-
-                    Repeater {
-                        model: root.savedWallets
-
-                        Rectangle {
-                            required property var modelData
-
-                            width: walletMenu.width - 16
-                            height: 38
-                            radius: 8
-
-                            color: walletMenuMouse.containsMouse
-                                ? "#273039"
-                                : "transparent"
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 10
-                                anchors.rightMargin: 10
-                                spacing: 8
-
-                                Text {
-                                    Layout.preferredWidth: 14
-
-                                    text:
-                                        root.walletMatches(modelData)
-                                            ? "✓"
-                                            : ""
-
-                                    color: root.cyan
-                                    font.pixelSize: 12
-                                    font.weight: Font.DemiBold
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-
-                                    text:
-                                        modelData.name === "Default"
-                                            ? "Default"
-                                            : modelData.name
-
-                                    color: root.primary
-                                    font.pixelSize: 13
-                                    font.weight:
-                                        root.walletMatches(modelData)
-                                            ? Font.DemiBold
-                                            : Font.Medium
-
-                                    elide: Text.ElideRight
-                                }
-                            }
-
-                            MouseArea {
-                                id: walletMenuMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-
-                                onClicked: {
-                                    if (!root.backend)
-                                        return
-
-                                    walletMenu.close()
-
-                                    if (root.walletMatches(modelData))
-                                        return
-
-                                    root.runOperation(
-                                        "Switching wallet…",
-                                        function() {
-                                            root.backend.switchWallet(
-                                                modelData.configPath,
-                                                modelData.storagePath)
-                                        })
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        width: walletMenu.width - 16
-                        height: 1
-                        color: root.line
-                    }
-
-                    Rectangle {
-                        width: walletMenu.width - 16
-                        height: 38
-                        radius: 8
-
-                        color: allWalletsMouse.containsMouse
-                            ? "#273039"
-                            : "transparent"
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 10
-                            anchors.rightMargin: 10
-                            spacing: 8
-
-                            Text {
-                                Layout.preferredWidth: 14
-                                text: "⋯"
-                                color: root.secondary
-                                font.pixelSize: 14
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: "All wallets…"
-                                color: root.primary
-                                font.pixelSize: 13
-                                font.weight: Font.Medium
-                            }
-                        }
-
-                        MouseArea {
-                            id: allWalletsMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-
-                            onClicked: {
-                                walletMenu.close()
-
-                                root.showCreateAnother = false
-                                root.showKeycardConnect = false
-                                root.importMode = ""
-                                root.walletChooserVisible = true
-                            }
-                        }
-                    }
-                }
-            }
 
             Rectangle {
                 id: lezBadge
@@ -1138,8 +928,7 @@ Rectangle {
     Rectangle {
         visible:
             root.recoveryPhrase.length === 0
-            && (root.walletChooserVisible
-                || root.walletState !== "open")
+            && root.walletState !== "open"
 
         anchors.fill: parent
         color: root.color
@@ -1148,7 +937,7 @@ Rectangle {
         Image {
             anchors.fill: parent
             source: Qt.resolvedUrl(
-                "../assets/branding/field-hero.png")
+                "assets/branding/field-hero.png")
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             cache: true
@@ -1240,11 +1029,8 @@ Rectangle {
                 Layout.fillWidth: true
                 visible: text.length > 0
                 text:
-                    (root.walletState === "configured"
-                     || root.walletChooserVisible)
-                        ? (root.showCreateAnother
-                            ? "Create a wallet"
-                            : root.showKeycardConnect
+                    root.walletState === "configured"
+                        ? (root.showKeycardConnect
                                 ? "Connect Keycard Card"
                                 : root.importMode === "choose"
                                 ? "Import wallet"
@@ -1282,8 +1068,7 @@ Rectangle {
 
             ColumnLayout {
                 visible:
-                    (root.walletState === "configured"
-                     || root.walletChooserVisible)
+                    root.walletState === "configured"
                     && root.hasSavedWallets
                     && root.importMode.length === 0
                     && !root.showKeycardConnect
@@ -1293,10 +1078,9 @@ Rectangle {
 
                 Text {
                     visible:
-                        !root.showCreateAnother
-                        && root.importMode.length === 0
+                        root.importMode.length === 0
                     Layout.fillWidth: true
-                    text: "Your wallets"
+                    text: "Wallet"
                     color: root.primary
                     font.pixelSize: 16
                     font.weight: Font.DemiBold
@@ -1342,8 +1126,7 @@ Rectangle {
 
 Repeater {
                     model:
-                        root.showCreateAnother
-                            || root.importMode.length > 0
+                        root.importMode.length > 0
                             ? []
                             : root.savedWallets
 
@@ -1719,31 +1502,12 @@ Repeater {
                                         if (!root.backend)
                                             return
 
-                                        if (root.walletState === "open"
-                                                && root.walletMatches(wallet)) {
-                                            root.walletChooserVisible = false
-                                            return
-                                        }
-
                                         root.runOperation(
-                                            root.walletState === "open"
-                                                ? "Switching wallet…"
-                                                : "Opening wallet…",
+                                            "Opening wallet…",
                                             function() {
-                                                if (root.walletState === "open") {
-                                                    root.backend.switchWallet(
-                                                        wallet.configPath,
-                                                        wallet.storagePath)
-                                                } else {
-                                                    root.backend.openWallet(
-                                                        wallet.configPath,
-                                                        wallet.storagePath)
-                                                }
-
-                                                if (!root.backend.walletError
-                                                        || root.backend.walletError.length === 0) {
-                                                    root.walletChooserVisible = false
-                                                }
+                                                root.backend.openWallet(
+                                                    wallet.configPath,
+                                                    wallet.storagePath)
                                             })
                                     }
                                 }
@@ -1754,207 +1518,9 @@ Repeater {
                     }
                 }
 
-                Rectangle {
-                    visible:
-                        !root.showCreateAnother
-                        && root.importMode.length === 0
 
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: root.onboardingControlHeight
 
-                    radius: 12
-                    color: "#15191e"
-                    border.width: 1
-                    border.color: root.line
 
-                    Text {
-                        anchors.centerIn: parent
-                        text: "+ Create another wallet"
-
-                        color: root.cyan
-                        font.pixelSize: 14
-                        font.weight: Font.DemiBold
-                    }
-
-                    MouseArea {
-                        cursorShape: Qt.PointingHandCursor; anchors.fill: parent
-
-                        onClicked:
-                            root.showCreateAnother = true
-                    }
-                }
-
-                ColumnLayout {
-                    visible: root.showCreateAnother
-                    Layout.fillWidth: true
-                    spacing: root.onboardingSectionGap
-
-                    TextField {
-                        id: newWalletNameField
-
-                        Layout.fillWidth: true
-
-                        placeholderText:
-                            "Wallet name, e.g. testing"
-
-                        color: root.primary
-                        placeholderTextColor: root.secondary
-
-                        background: Rectangle {
-                            radius: 11
-                            color: root.panel
-                            border.width: 1
-
-                            border.color:
-                                newWalletNameField.text.length === 0
-                                    || root.validWalletName(
-                                        newWalletNameField.text)
-                                    ? root.line
-                                    : "#7e4949"
-                        }
-                    }
-
-                    Text {
-                        visible:
-                            newWalletNameField.text.length > 0
-                            && !root.validWalletName(
-                                newWalletNameField.text)
-
-                        text:
-                            "Use letters, numbers, - or _ only."
-
-                        color: "#d28a8a"
-                        font.pixelSize: 12
-                    }
-
-                    TextField {
-                        id: newWalletPasswordField
-
-                        Layout.fillWidth: true
-                        placeholderText: "Wallet password"
-                        echoMode: TextInput.Password
-
-                        color: root.primary
-                        placeholderTextColor: root.secondary
-
-                        background: Rectangle {
-                            radius: 11
-                            color: root.panel
-                            border.width: 1
-                            border.color: root.line
-                        }
-                    }
-
-                    TextField {
-                        id: newWalletSequencerField
-
-                        Layout.fillWidth: true
-
-                        placeholderText:
-                            "Sequencer URL (blank = Logos testnet)"
-
-                        color: root.primary
-                        placeholderTextColor: root.secondary
-
-                        background: Rectangle {
-                            radius: 11
-                            color: root.panel
-                            border.width: 1
-                            border.color: root.line
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.onboardingControlHeight
-
-                        readonly property bool canCreate:
-                            root.validWalletName(
-                                newWalletNameField.text)
-                            && newWalletPasswordField.text.length > 0
-
-                        radius: 12
-
-                        color:
-                            canCreate
-                                ? "#16302b"
-                                : "#171c22"
-
-                        border.width: 1
-
-                        border.color:
-                            canCreate
-                                ? "#2d786b"
-                                : root.line
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "Create wallet"
-
-                            color:
-                                parent.canCreate
-                                    ? root.primary
-                                    : root.secondary
-
-                            font.pixelSize: 14
-                            font.weight: Font.DemiBold
-                        }
-
-                        MouseArea {
-                            cursorShape: Qt.PointingHandCursor; anchors.fill: parent
-                            enabled: parent.canCreate
-
-                            onClicked: {
-                                var walletName =
-                                    newWalletNameField.text
-
-                                var password =
-                                    newWalletPasswordField.text
-
-                                var sequencer =
-                                    newWalletSequencerField.text
-
-                                root.runOperation(
-                                    "Creating wallet…",
-                                    function() {
-                                        root.backend
-                                            .createNamedWallet(
-                                                walletName,
-                                                password,
-                                                sequencer)
-                                    })
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.onboardingControlHeight
-                        radius: 12
-                        color: "transparent"
-                        border.width: 1
-                        border.color: root.line
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "Cancel"
-                            color: root.secondary
-                            font.pixelSize: 14
-                            font.weight: Font.DemiBold
-                        }
-
-                        MouseArea {
-                            cursorShape: Qt.PointingHandCursor; anchors.fill: parent
-
-                            onClicked: {
-                                newWalletNameField.text = ""
-                                newWalletPasswordField.text = ""
-                                newWalletSequencerField.text = ""
-                                root.showCreateAnother = false
-                            }
-                        }
-                    }
-                }
             }
 
             ColumnLayout {
@@ -2066,10 +1632,8 @@ Repeater {
                             cursorShape: Qt.PointingHandCursor; anchors.fill: parent
 
                             onClicked: {
-                                newWalletNameField.text = ""
-                                newWalletPasswordField.text = ""
-                                newWalletSequencerField.text = ""
-                                root.showCreateAnother = false
+                                passwordField.text = ""
+                                sequencerField.text = ""
                             }
                         }
                     }
@@ -2082,8 +1646,7 @@ Repeater {
 
             Rectangle {
                 visible:
-                    !root.showCreateAnother
-                    && !root.showKeycardConnect
+                    !root.showKeycardConnect
                     && root.importMode.length === 0
                     && root.walletState !== "loading"
                     && root.walletState !== "error"
@@ -2248,8 +1811,7 @@ Repeater {
 
             Rectangle {
                 visible:
-                    !root.showCreateAnother
-                    && !root.showKeycardConnect
+                    !root.showKeycardConnect
                     && root.importMode.length === 0
                     && root.walletState !== "loading"
                     && root.walletState !== "error"
@@ -3129,7 +2691,6 @@ Repeater {
     Rectangle {
         visible: root.operationPending
             || (root.backend && root.backend.walletBusy)
-            || (root.backend && root.backend.walletSwitchBusy)
                         || (root.backend && root.backend.accountBusy)
 
         anchors.fill: parent
@@ -3159,7 +2720,6 @@ Repeater {
                     loops: Animation.Infinite
                     running: root.operationPending
                         || (root.backend && root.backend.walletBusy)
-                        || (root.backend && root.backend.walletSwitchBusy)
                         || (root.backend && root.backend.accountBusy)
                 }
 
@@ -3187,9 +2747,7 @@ Repeater {
                 anchors.horizontalCenter: parent.horizontalCenter
 
                 text:
-                    root.backend && root.backend.walletSwitchBusy
-                        ? "Switching wallet…"
-                        : root.backend && root.backend.walletBusy
+                    root.backend && root.backend.walletBusy
                             ? "Creating wallet…"
                             : root.operationLabel.length
                                 ? root.operationLabel
@@ -3315,7 +2873,7 @@ Repeater {
                 anchors.fill: parent
 
                 source:
-                    "../assets/branding/field-hero.png"
+                    "assets/branding/field-hero.png"
 
                 fillMode: Image.PreserveAspectCrop
                 smooth: true

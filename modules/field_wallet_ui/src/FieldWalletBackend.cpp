@@ -367,24 +367,28 @@ void FieldWalletBackend::loadSavedWallets()
                     .toString()
                     .trimmed();
 
-            // Existing wallets automatically start with their
-            // immutable wallet ID as their Field display name.
-            if (displayName.isEmpty()) {
-                displayName = walletId;
+            // Basecamp exposes one LEZ wallet vault. Migrate the old
+            // internal "default" label into a user-facing vault name.
+            if (walletId == QStringLiteral("default") &&
+                (displayName.isEmpty() ||
+                 displayName == QStringLiteral("default") ||
+                 displayName == QStringLiteral("Default"))) {
+                displayName = QStringLiteral("LEZ Wallet");
+            } else if (displayName.isEmpty()) {
+                displayName =
+                    wallet.value(QStringLiteral("name"))
+                        .toString()
+                        .trimmed();
 
-                if (displayName.isEmpty()) {
-                    displayName =
-                        wallet.value(
-                            QStringLiteral("name"))
-                            .toString();
-                }
+                if (displayName.isEmpty())
+                    displayName = walletId;
+            }
 
-                if (!displayName.isEmpty()) {
-                    settings.setValue(
-                        prefix +
+            if (!displayName.isEmpty()) {
+                settings.setValue(
+                    prefix +
                         QStringLiteral("displayName"),
-                        displayName);
-                }
+                    displayName);
             }
 
             if (!walletId.isEmpty()) {

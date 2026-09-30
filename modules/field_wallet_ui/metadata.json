@@ -1,7 +1,7 @@
 {
   "name": "field_wallet_ui",
   "display_name": "Field Wallet",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "ui_qml",
   "category": "wallet",
   "description": "Field Wallet interface for Logos Execution Zone accounts, assets, permissions, and transaction approvals",

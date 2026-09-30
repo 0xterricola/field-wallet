@@ -394,7 +394,7 @@ std::string FieldWalletModule::wallet_list_saved()
 
     logos::CallError path_error;
 
-    const auto default_paths =
+    const auto paths =
         defaultWalletPaths(
             modules(),
             path_error);
@@ -405,7 +405,7 @@ std::string FieldWalletModule::wallet_list_saved()
         return out.dump();
     }
 
-    if (!default_paths.has_value()) {
+    if (!paths.has_value()) {
         out["ok"] = false;
         out["code"] = "wallet_dir_unavailable";
         return out.dump();
@@ -414,95 +414,14 @@ std::string FieldWalletModule::wallet_list_saved()
     nlohmann::json wallets =
         nlohmann::json::array();
 
-    if (std::filesystem::exists(
-            default_paths->config) &&
-        std::filesystem::exists(
-            default_paths->storage)) {
+    if (std::filesystem::exists(paths->config) &&
+        std::filesystem::exists(paths->storage)) {
         wallets.push_back({
             {"id", "default"},
-            {"name", "Default"},
-            {"configPath", default_paths->config},
-            {"storagePath", default_paths->storage}
+            {"name", "LEZ Wallet"},
+            {"configPath", paths->config},
+            {"storagePath", paths->storage}
         });
-    }
-
-    const std::filesystem::path profiles_root =
-        managedWalletsRoot(
-            *default_paths);
-
-    std::error_code ec;
-
-    if (std::filesystem::exists(
-            profiles_root,
-            ec) &&
-        !ec) {
-        std::vector<std::filesystem::path>
-            directories;
-
-        std::filesystem::directory_iterator iterator(
-            profiles_root,
-            ec);
-
-        const std::filesystem::directory_iterator end;
-
-        while (!ec && iterator != end) {
-            const std::filesystem::directory_entry entry =
-                *iterator;
-
-            std::error_code status_error;
-
-            const std::filesystem::file_status status =
-                entry.symlink_status(
-                    status_error);
-
-            if (!status_error &&
-                std::filesystem::is_directory(
-                    status) &&
-                !std::filesystem::is_symlink(
-                    status)) {
-                directories.push_back(
-                    entry.path());
-            }
-
-            iterator.increment(ec);
-        }
-
-        if (ec) {
-            out["ok"] = false;
-            out["code"] =
-                "wallet_directory_read_failed";
-            return out.dump();
-        }
-
-        std::sort(
-            directories.begin(),
-            directories.end());
-
-        for (const auto& directory :
-             directories) {
-            const WalletPaths paths =
-                walletPathsInDirectory(
-                    directory);
-
-            if (!std::filesystem::exists(
-                    paths.config) ||
-                !std::filesystem::exists(
-                    paths.storage)) {
-                continue;
-            }
-
-            const std::string wallet_name =
-                directory
-                    .filename()
-                    .string();
-
-            wallets.push_back({
-                {"id", wallet_name},
-                {"name", wallet_name},
-                {"configPath", paths.config},
-                {"storagePath", paths.storage}
-            });
-        }
     }
 
     out["ok"] = true;
@@ -616,25 +535,6 @@ std::string FieldWalletModule::wallet_create_named(
             out["ok"] = false;
             out["code"] =
                 "current_wallet_save_failed";
-            return out.dump();
-        }
-
-        logos::CallError close_error;
-
-        const int64_t close_result =
-            modules().lez_core.close(
-                &close_error);
-
-        if (!close_error.ok() ||
-            close_result != kWalletFfiSuccess) {
-            std::error_code ignored;
-            std::filesystem::remove(
-                paths.config,
-                ignored);
-
-            out["ok"] = false;
-            out["code"] =
-                "current_wallet_close_failed";
             return out.dump();
         }
 
@@ -1031,19 +931,6 @@ std::string FieldWalletModule::wallet_switch(
             save_result != kWalletFfiSuccess) {
             out["ok"] = false;
             out["code"] = "wallet_save_failed";
-            return out.dump();
-        }
-
-        logos::CallError close_error;
-
-        const int64_t close_result =
-            modules().lez_core.close(
-                &close_error);
-
-        if (!close_error.ok() ||
-            close_result != kWalletFfiSuccess) {
-            out["ok"] = false;
-            out["code"] = "wallet_close_failed";
             return out.dump();
         }
 
