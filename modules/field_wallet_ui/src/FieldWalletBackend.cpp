@@ -916,6 +916,34 @@ void FieldWalletBackend::switchWallet(
 
 void FieldWalletBackend::clearRecoveryPhrase()
 {
+    setWalletError(QString());
+
+    const QString raw =
+        m_logos
+            ->field_wallet
+            .wallet_confirm_recovery_backup();
+
+    QJsonObject result;
+
+    if (!parseObject(raw, result)) {
+        setWalletError(
+            QStringLiteral(
+                "recovery backup: invalid response"));
+        return;
+    }
+
+    if (!result
+             .value(QStringLiteral("ok"))
+             .toBool()) {
+        setWalletError(
+            QStringLiteral("recovery backup: ") +
+            resultCode(
+                result,
+                QStringLiteral(
+                    "unknown error")));
+        return;
+    }
+
     setRecoveryPhrase(QString());
     refreshWallet();
 }

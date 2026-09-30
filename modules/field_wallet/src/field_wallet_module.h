@@ -31,6 +31,9 @@ public:
     /// Create Field's default LEZ wallet and return its recovery mnemonic.
     std::string wallet_create(const std::string& password, const std::string& sequencer_addr);
 
+    /// Confirm that the recovery phrase has been backed up.
+    std::string wallet_confirm_recovery_backup();
+
     /// List Field-managed wallet vaults available on disk.
     std::string wallet_list_saved();
 

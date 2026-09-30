@@ -929,6 +929,7 @@ Rectangle {
         visible:
             root.recoveryPhrase.length === 0
             && root.walletState !== "open"
+            && root.walletState !== "recovery_pending"
 
         anchors.fill: parent
         color: root.color
@@ -2470,6 +2471,91 @@ Repeater {
                 color: "#e58b8b"
                 wrapMode: Text.WordWrap
                 font.pixelSize: 12
+            }
+        }
+    }
+
+    Rectangle {
+        visible:
+            root.walletState === "recovery_pending"
+            && root.recoveryPhrase.length === 0
+
+        anchors.fill: parent
+        color: root.color
+        z: 30
+
+        ColumnLayout {
+            width: Math.min(600, parent.width - 48)
+            anchors.centerIn: parent
+            spacing: 16
+
+            Text {
+                Layout.fillWidth: true
+                text: "Recovery backup not confirmed"
+                color: root.primary
+                font.pixelSize: 23
+                font.weight: Font.DemiBold
+                horizontalAlignment: Text.AlignHCenter
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text:
+                    "This wallet was created, but Field was closed before "
+                    + "the recovery phrase backup was confirmed."
+                color: root.secondary
+                font.pixelSize: 14
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text:
+                    "For security, Field does not store the recovery phrase "
+                    + "and cannot display it again after a restart."
+                color: root.cyan
+                font.pixelSize: 13
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text:
+                    "Continue only if you already wrote down or otherwise "
+                    + "saved the recovery phrase shown during creation."
+                color: root.secondary
+                font.pixelSize: 13
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 44
+                radius: 13
+                color: "#16302b"
+                border.width: 1
+                border.color: "#2d786b"
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "I already saved the recovery phrase"
+                    color: root.primary
+                    font.pixelSize: 14
+                    font.weight: Font.DemiBold
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+
+                    onClicked: {
+                        if (root.backend)
+                            root.backend.clearRecoveryPhrase()
+                    }
+                }
             }
         }
     }

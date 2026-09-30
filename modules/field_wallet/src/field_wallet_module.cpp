@@ -225,6 +225,43 @@ bool writeWalletConfig(
     return output.good();
 }
 
+constexpr const char* kRecoveryBackupPendingFile =
+    ".field-recovery-backup-pending";
+
+std::filesystem::path recoveryBackupPendingPath(
+    const std::string& storage_path)
+{
+    return std::filesystem::path(storage_path)
+        .parent_path() /
+        kRecoveryBackupPendingFile;
+}
+
+bool writeRecoveryBackupPendingMarker(
+    const std::string& storage_path)
+{
+    const std::filesystem::path marker =
+        recoveryBackupPendingPath(storage_path);
+
+    std::ofstream output(
+        marker,
+        std::ios::trunc);
+
+    if (!output)
+        return false;
+
+    output << "pending\n";
+    output.flush();
+
+    return output.good();
+}
+
+bool recoveryBackupPending(
+    const std::string& storage_path)
+{
+    return std::filesystem::exists(
+        recoveryBackupPendingPath(storage_path));
+}
+
 } // namespace
 
 std::string FieldWalletModule::name() const {
@@ -354,7 +391,15 @@ std::string FieldWalletModule::wallet_status()
         out["storagePath"] = paths->storage;
     }
 
-    if (wallet_open_) {
+    const bool recovery_pending =
+        config_exists &&
+        storage_exists &&
+        recoveryBackupPending(
+            paths->storage);
+
+    if (recovery_pending) {
+        out["state"] = "recovery_pending";
+    } else if (wallet_open_) {
         out["state"] = "open";
     } else if (config_exists &&
                storage_exists) {
@@ -721,6 +766,21 @@ std::string FieldWalletModule::wallet_create(
         return out.dump();
     }
 
+    if (!writeRecoveryBackupPendingMarker(
+            paths->storage)) {
+        if (!config_existed) {
+            std::error_code ignored;
+            std::filesystem::remove(
+                paths->config,
+                ignored);
+        }
+
+        out["ok"] = false;
+        out["code"] =
+            "recovery_marker_write_failed";
+        return out.dump();
+    }
+
     logos::CallError create_error;
 
     const std::string mnemonic =
@@ -734,6 +794,14 @@ std::string FieldWalletModule::wallet_create(
 
     if (!create_error.ok() ||
         mnemonic.empty()) {
+        {
+            std::error_code ignored;
+            std::filesystem::remove(
+                recoveryBackupPendingPath(
+                    paths->storage),
+                ignored);
+        }
+
         if (!config_existed) {
             std::error_code ignored;
             std::filesystem::remove(
@@ -779,6 +847,76 @@ std::string FieldWalletModule::wallet_create(
     return out.dump();
 }
 
+std::string FieldWalletModule::wallet_confirm_recovery_backup()
+{
+    nlohmann::json out;
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    logos::CallError ready_error;
+
+    if (!lezDependencyReady(
+            modules(),
+            ready_error)) {
+        out["ok"] = false;
+        out["code"] = "dependency_not_ready";
+        return out.dump();
+    }
+
+    logos::CallError path_error;
+
+    const auto paths =
+        defaultWalletPaths(
+            modules(),
+            path_error);
+
+    if (!path_error.ok()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    if (!paths.has_value()) {
+        out["ok"] = false;
+        out["code"] = "wallet_dir_unavailable";
+        return out.dump();
+    }
+
+    if (!std::filesystem::exists(
+            paths->storage)) {
+        out["ok"] = false;
+        out["code"] = "wallet_not_found";
+        return out.dump();
+    }
+
+    std::error_code ec;
+
+    const bool removed =
+        std::filesystem::remove(
+            recoveryBackupPendingPath(
+                paths->storage),
+            ec);
+
+    if (ec) {
+        out["ok"] = false;
+        out["code"] =
+            "recovery_marker_remove_failed";
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["cleared"] = removed;
+
+    return out.dump();
+}
+
 std::string FieldWalletModule::wallet_open(
     const std::string& config_path,
     const std::string& storage_path)
@@ -818,6 +956,14 @@ std::string FieldWalletModule::wallet_open(
             storage_path)) {
         out["ok"] = false;
         out["code"] = "storage_not_found";
+        return out.dump();
+    }
+
+    if (recoveryBackupPending(
+            storage_path)) {
+        out["ok"] = false;
+        out["code"] =
+            "recovery_backup_pending";
         return out.dump();
     }
 
