@@ -631,6 +631,15 @@ std::string FieldWalletModule::wallet_create_named(
         return out.dump();
     }
 
+    // LEZ 0.3 exposes one live wallet handle and no close/reset operation.
+    // Do not let Field clear its own state while LEZ still owns that handle.
+    if (wallet_open_) {
+        out["ok"] = false;
+        out["code"] = "wallet_create_requires_restart";
+        out["restartRequired"] = true;
+        return out.dump();
+    }
+
     logos::CallError ready_error;
 
     if (!lezDependencyReady(
@@ -1290,8 +1299,20 @@ std::string FieldWalletModule::wallet_open(
     }
 
     if (wallet_open_) {
-        out["ok"] = true;
-        out["state"] = "open";
+        if (config_path == current_config_path_ &&
+            storage_path == current_storage_path_) {
+            out["ok"] = true;
+            out["state"] = "open";
+            out["configPath"] = current_config_path_;
+            out["storagePath"] = current_storage_path_;
+            return out.dump();
+        }
+
+        out["ok"] = false;
+        out["code"] = "wallet_open_requires_restart";
+        out["restartRequired"] = true;
+        out["configPath"] = current_config_path_;
+        out["storagePath"] = current_storage_path_;
         return out.dump();
     }
 
@@ -1413,6 +1434,18 @@ std::string FieldWalletModule::wallet_switch(
         storage_path == current_storage_path_) {
         out["ok"] = true;
         out["state"] = "open";
+        out["configPath"] = current_config_path_;
+        out["storagePath"] = current_storage_path_;
+        return out.dump();
+    }
+
+    // LEZ 0.3 does not currently expose a close/reset operation for its
+    // single live wallet handle. Never pretend the handle was closed by
+    // clearing only Field's bookkeeping.
+    if (wallet_open_) {
+        out["ok"] = false;
+        out["code"] = "wallet_switch_requires_restart";
+        out["restartRequired"] = true;
         out["configPath"] = current_config_path_;
         out["storagePath"] = current_storage_path_;
         return out.dump();
