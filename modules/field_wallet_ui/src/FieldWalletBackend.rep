@@ -27,6 +27,7 @@ class FieldWalletBackend
     SLOT(void chooseWalletFolder())
     SLOT(void createWallet(QString password, QString sequencerAddr))
     SLOT(void createNamedWallet(QString walletName, QString password, QString sequencerAddr))
+    SLOT(void restoreNamedWallet(QString walletName, QString mnemonic, QString password, QString sequencerAddr))
     SLOT(void openWallet(QString configPath, QString storagePath))
     SLOT(void switchWallet(QString configPath, QString storagePath))
     SLOT(void renameWallet(QString storagePath, QString displayName))

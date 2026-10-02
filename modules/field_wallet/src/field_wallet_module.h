@@ -40,6 +40,9 @@ public:
     /// Create another named Field wallet without replacing an existing wallet.
     std::string wallet_create_named(const std::string& wallet_name, const std::string& password, const std::string& sequencer_addr);
 
+    /// Restore a recovery phrase into a new Field-managed wallet.
+    std::string wallet_restore_named(const std::string& wallet_name, const std::string& mnemonic, const std::string& password, const std::string& sequencer_addr);
+
     /// Open an existing LEZ wallet for Field.
     std::string wallet_open(const std::string& config_path, const std::string& storage_path);
     std::string wallet_switch(const std::string& config_path, const std::string& storage_path);

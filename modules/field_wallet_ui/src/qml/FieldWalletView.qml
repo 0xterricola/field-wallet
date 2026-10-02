@@ -13,6 +13,7 @@ Rectangle {
 
     readonly property var backend: logos ? logos.module("field_wallet_ui") : null
     property bool advancedMode: false
+    property bool walletHomeVisible: false
     readonly property string currentWalletLabel:
         activeWalletName()
     property bool approvalVisible: false
@@ -412,11 +413,23 @@ Rectangle {
                 Text {
                     anchors.centerIn: parent
 
-                    text: root.currentWalletLabel
+                    text: root.currentWalletLabel + "  ▾"
                     color: root.primary
 
                     font.pixelSize: 12
                     font.weight: Font.Medium
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+
+                    onClicked: {
+                        root.importMode = ""
+                        root.showKeycardConnect = false
+                        root.walletHomeVisible = true
+                    }
                 }
             }
 
@@ -928,7 +941,8 @@ Rectangle {
     Rectangle {
         visible:
             root.recoveryPhrase.length === 0
-            && root.walletState !== "open"
+            && (root.walletHomeVisible
+                || root.walletState !== "open")
             && root.walletState !== "recovery_pending"
 
         anchors.fill: parent
@@ -1069,7 +1083,8 @@ Rectangle {
 
             ColumnLayout {
                 visible:
-                    root.walletState === "configured"
+                    (root.walletState === "configured"
+                     || root.walletHomeVisible)
                     && root.hasSavedWallets
                     && root.importMode.length === 0
                     && !root.showKeycardConnect
@@ -1503,12 +1518,28 @@ Repeater {
                                         if (!root.backend)
                                             return
 
+                                        if (root.walletState === "open"
+                                                && root.walletMatches(wallet)) {
+                                            root.walletHomeVisible = false
+                                            return
+                                        }
+
                                         root.runOperation(
-                                            "Opening wallet…",
+                                            root.walletState === "open"
+                                                ? "Switching wallet…"
+                                                : "Opening wallet…",
                                             function() {
-                                                root.backend.openWallet(
-                                                    wallet.configPath,
-                                                    wallet.storagePath)
+                                                if (root.walletState === "open") {
+                                                    root.backend.switchWallet(
+                                                        wallet.configPath,
+                                                        wallet.storagePath)
+                                                } else {
+                                                    root.backend.openWallet(
+                                                        wallet.configPath,
+                                                        wallet.storagePath)
+                                                }
+
+                                                root.walletHomeVisible = false
                                             })
                                     }
                                 }
@@ -1526,8 +1557,10 @@ Repeater {
 
             ColumnLayout {
                 visible:
-                    root.walletState === "uninitialized"
-                    || root.walletState === "incomplete"
+                    (root.walletState === "uninitialized"
+                     || root.walletState === "incomplete")
+                    && !root.showKeycardConnect
+                    && root.importMode.length === 0
 
                 Layout.fillWidth: true
                 spacing: root.onboardingSectionGap
@@ -1612,32 +1645,6 @@ Repeater {
                         }
                     }
 
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.onboardingControlHeight
-
-                        radius: 12
-                        color: "transparent"
-                        border.width: 1
-                        border.color: root.line
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "Cancel"
-                            color: root.secondary
-                            font.pixelSize: 14
-                            font.weight: Font.DemiBold
-                        }
-
-                        MouseArea {
-                            cursorShape: Qt.PointingHandCursor; anchors.fill: parent
-
-                            onClicked: {
-                                passwordField.text = ""
-                                sequencerField.text = ""
-                            }
-                        }
-                    }
                 }
             }
 
@@ -2019,23 +2026,67 @@ Repeater {
                 }
 
                 Rectangle {
+                    id: seedImportButton
+
+                    property bool canImport:
+                        seedWalletNameField.text.trim().length > 0
+                        && seedPhraseField.text.trim().length > 0
+                        && seedPasswordField.text.length > 0
+                        && root.backend
+                        && !root.backend.walletBusy
+                        && !root.backend.walletSwitchBusy
+
                     Layout.fillWidth: true
                     Layout.preferredHeight: root.onboardingControlHeight
 
                     radius: 12
-                    color: "#171c22"
+
+                    color:
+                        canImport
+                            ? "#16302b"
+                            : "#171c22"
+
                     border.width: 1
-                    border.color: root.line
+
+                    border.color:
+                        canImport
+                            ? "#2d786b"
+                            : root.line
 
                     Text {
                         anchors.centerIn: parent
                         text: "Import wallet"
-                        color: root.secondary
+
+                        color:
+                            seedImportButton.canImport
+                                ? root.primary
+                                : root.secondary
+
                         font.pixelSize: 14
                         font.weight: Font.DemiBold
                     }
 
-                    // Backend seed restore gets wired next.
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape:
+                            seedImportButton.canImport
+                                ? Qt.PointingHandCursor
+                                : Qt.ArrowCursor
+
+                        enabled: seedImportButton.canImport
+
+                        onClicked: {
+                            root.runOperation(
+                                "Restoring wallet…",
+                                function() {
+                                    root.backend.restoreNamedWallet(
+                                        seedWalletNameField.text,
+                                        seedPhraseField.text,
+                                        seedPasswordField.text,
+                                        seedSequencerField.text)
+                                })
+                        }
+                    }
                 }
 
                 Rectangle {

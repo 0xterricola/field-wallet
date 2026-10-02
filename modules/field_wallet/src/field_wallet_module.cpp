@@ -379,6 +379,63 @@ std::string FieldWalletModule::wallet_status()
         std::filesystem::exists(
             paths->storage);
 
+    bool managed_wallet_exists = false;
+
+    const std::filesystem::path wallets_root =
+        managedWalletsRoot(*paths);
+
+    std::error_code wallets_ec;
+
+    if (std::filesystem::exists(
+            wallets_root,
+            wallets_ec) &&
+        !wallets_ec) {
+        std::filesystem::directory_iterator iterator(
+            wallets_root,
+            wallets_ec);
+
+        const std::filesystem::directory_iterator end;
+
+        while (!wallets_ec && iterator != end) {
+            const std::filesystem::directory_entry entry =
+                *iterator;
+
+            std::error_code status_error;
+
+            const std::filesystem::file_status status =
+                entry.symlink_status(status_error);
+
+            if (!status_error &&
+                std::filesystem::is_directory(status) &&
+                !std::filesystem::is_symlink(status)) {
+                const std::string wallet_name =
+                    entry.path().filename().string();
+
+                if (isSafeWalletName(wallet_name)) {
+                    const WalletPaths wallet_paths =
+                        walletPathsInDirectory(
+                            entry.path());
+
+                    if (std::filesystem::exists(
+                            wallet_paths.config) &&
+                        std::filesystem::exists(
+                            wallet_paths.storage)) {
+                        managed_wallet_exists = true;
+                        break;
+                    }
+                }
+            }
+
+            iterator.increment(wallets_ec);
+        }
+
+        if (wallets_ec) {
+            out["ok"] = false;
+            out["code"] = "wallet_directory_read_failed";
+            return out.dump();
+        }
+    }
+
     out["ok"] = true;
 
     if (wallet_open_ &&
@@ -401,8 +458,9 @@ std::string FieldWalletModule::wallet_status()
         out["state"] = "recovery_pending";
     } else if (wallet_open_) {
         out["state"] = "open";
-    } else if (config_exists &&
-               storage_exists) {
+    } else if ((config_exists &&
+                storage_exists) ||
+               managed_wallet_exists) {
         out["state"] = "configured";
     } else if (!config_exists &&
                !storage_exists) {
@@ -467,6 +525,76 @@ std::string FieldWalletModule::wallet_list_saved()
             {"configPath", paths->config},
             {"storagePath", paths->storage}
         });
+    }
+
+    const std::filesystem::path wallets_root =
+        managedWalletsRoot(*paths);
+
+    std::error_code ec;
+
+    if (std::filesystem::exists(wallets_root, ec) &&
+        !ec) {
+        std::vector<std::filesystem::path> directories;
+
+        std::filesystem::directory_iterator iterator(
+            wallets_root,
+            ec);
+
+        const std::filesystem::directory_iterator end;
+
+        while (!ec && iterator != end) {
+            const std::filesystem::directory_entry entry =
+                *iterator;
+
+            std::error_code status_error;
+
+            const std::filesystem::file_status status =
+                entry.symlink_status(status_error);
+
+            if (!status_error &&
+                std::filesystem::is_directory(status) &&
+                !std::filesystem::is_symlink(status)) {
+                directories.push_back(entry.path());
+            }
+
+            iterator.increment(ec);
+        }
+
+        if (ec) {
+            out["ok"] = false;
+            out["code"] = "wallet_directory_read_failed";
+            return out.dump();
+        }
+
+        std::sort(
+            directories.begin(),
+            directories.end());
+
+        for (const auto& directory : directories) {
+            const std::string wallet_name =
+                directory.filename().string();
+
+            if (!isSafeWalletName(wallet_name)) {
+                continue;
+            }
+
+            const WalletPaths wallet_paths =
+                walletPathsInDirectory(directory);
+
+            if (!std::filesystem::exists(
+                    wallet_paths.config) ||
+                !std::filesystem::exists(
+                    wallet_paths.storage)) {
+                continue;
+            }
+
+            wallets.push_back({
+                {"id", wallet_name},
+                {"name", wallet_name},
+                {"configPath", wallet_paths.config},
+                {"storagePath", wallet_paths.storage}
+            });
+        }
     }
 
     out["ok"] = true;
@@ -688,6 +816,235 @@ std::string FieldWalletModule::wallet_create_named(
 
     return out.dump();
 }
+
+std::string FieldWalletModule::wallet_restore_named(
+    const std::string& wallet_name,
+    const std::string& mnemonic,
+    const std::string& password,
+    const std::string& sequencer_addr)
+{
+    nlohmann::json out;
+
+    const logos::LogosCaller caller =
+        logos::currentCaller();
+
+    if (!field::isTrustedApprovalCaller(caller)) {
+        out["ok"] = false;
+        out["code"] = "approval_not_authorized";
+        return out.dump();
+    }
+
+    if (!isSafeWalletName(wallet_name)) {
+        out["ok"] = false;
+        out["code"] = "invalid_wallet_name";
+        return out.dump();
+    }
+
+    if (mnemonic.empty()) {
+        out["ok"] = false;
+        out["code"] = "mnemonic_required";
+        return out.dump();
+    }
+
+    if (password.empty()) {
+        out["ok"] = false;
+        out["code"] = "password_required";
+        return out.dump();
+    }
+
+    // The current LEZ lifecycle API has one live wallet handle and does
+    // not expose a close operation. Never overwrite an already-open wallet.
+    if (wallet_open_) {
+        out["ok"] = false;
+        out["code"] = "wallet_already_open";
+        return out.dump();
+    }
+
+    logos::CallError ready_error;
+
+    if (!lezDependencyReady(
+            modules(),
+            ready_error)) {
+        out["ok"] = false;
+        out["code"] = "dependency_not_ready";
+        return out.dump();
+    }
+
+    logos::CallError path_error;
+
+    const auto default_paths =
+        defaultWalletPaths(
+            modules(),
+            path_error);
+
+    if (!path_error.ok()) {
+        out["ok"] = false;
+        out["code"] = "lez_error";
+        return out.dump();
+    }
+
+    if (!default_paths.has_value()) {
+        out["ok"] = false;
+        out["code"] = "wallet_dir_unavailable";
+        return out.dump();
+    }
+
+    const WalletPaths paths =
+        namedWalletPaths(
+            *default_paths,
+            wallet_name);
+
+    if (std::filesystem::exists(paths.config) ||
+        std::filesystem::exists(paths.storage)) {
+        out["ok"] = false;
+        out["code"] = "wallet_already_exists";
+        out["walletId"] = wallet_name;
+        out["storagePath"] = paths.storage;
+        return out.dump();
+    }
+
+    if (!writeWalletConfig(
+            paths.config,
+            sequencer_addr)) {
+        out["ok"] = false;
+        out["code"] = "config_write_failed";
+        return out.dump();
+    }
+
+    logos::CallError create_error;
+
+    // restore_storage() operates on an existing wallet handle, so create
+    // the destination vault first. Its generated mnemonic is intentionally
+    // discarded after the supplied recovery phrase replaces the keychain.
+    const std::string generated_mnemonic =
+        modules().lez_core.create_new(
+            paths.config,
+            paths.storage,
+            paths.statistics,
+            password,
+            &create_error,
+            120000);
+
+    if (!create_error.ok() ||
+        generated_mnemonic.empty()) {
+        std::error_code ignored;
+
+        std::filesystem::remove(
+            paths.config,
+            ignored);
+        std::filesystem::remove(
+            paths.storage,
+            ignored);
+        std::filesystem::remove(
+            paths.statistics,
+            ignored);
+        std::filesystem::remove(
+            std::filesystem::path(paths.config)
+                .parent_path(),
+            ignored);
+
+        out["ok"] = false;
+        out["code"] = "wallet_create_failed";
+        return out.dump();
+    }
+
+    logos::CallError restore_error;
+
+    constexpr uint32_t kRestoreDepth = 5;
+
+    const int64_t restore_result =
+        modules().lez_core.restore_storage(
+            mnemonic,
+            password,
+            kRestoreDepth,
+            &restore_error,
+            120000);
+
+    if (!restore_error.ok() ||
+        restore_result != kWalletFfiSuccess) {
+        // LEZ currently provides no close operation. Remove the failed
+        // vault from disk and require a process restart before retrying,
+        // because the temporary wallet handle still exists in LEZ.
+        std::error_code ignored;
+
+        std::filesystem::remove(
+            paths.config,
+            ignored);
+        std::filesystem::remove(
+            paths.storage,
+            ignored);
+        std::filesystem::remove(
+            paths.statistics,
+            ignored);
+        std::filesystem::remove(
+            std::filesystem::path(paths.config)
+                .parent_path(),
+            ignored);
+
+        out["ok"] = false;
+        out["code"] = "wallet_restore_failed";
+        out["ffiCode"] = restore_result;
+        out["restartRequired"] = true;
+        return out.dump();
+    }
+
+    wallet_open_ = true;
+    current_config_path_ = paths.config;
+    current_storage_path_ = paths.storage;
+
+    // Match the upstream recovery test: after rebuilding keys, sync the
+    // restored wallet against current chain state so balances can recover.
+    bool sync_complete = false;
+
+    logos::CallError height_error;
+
+    const int64_t current_height =
+        modules().lez_core.get_current_block_height(
+            &height_error,
+            120000);
+
+    if (height_error.ok()) {
+        logos::CallError sync_error;
+
+        const int64_t sync_result =
+            modules().lez_core.sync_to_block(
+                current_height,
+                &sync_error,
+                120000);
+
+        sync_complete =
+            sync_error.ok() &&
+            sync_result == kWalletFfiSuccess;
+    }
+
+    logos::CallError save_error;
+
+    const int64_t save_result =
+        modules().lez_core.save(
+            &save_error);
+
+    if (!save_error.ok() ||
+        save_result != kWalletFfiSuccess ||
+        !std::filesystem::exists(paths.storage)) {
+        out["ok"] = false;
+        out["code"] = "wallet_save_failed";
+        out["walletOpen"] = true;
+        out["walletId"] = wallet_name;
+        out["configPath"] = paths.config;
+        out["storagePath"] = paths.storage;
+        return out.dump();
+    }
+
+    out["ok"] = true;
+    out["state"] = "open";
+    out["walletId"] = wallet_name;
+    out["configPath"] = paths.config;
+    out["storagePath"] = paths.storage;
+    out["syncComplete"] = sync_complete;
+
+    return out.dump();
+}
+
 
 std::string FieldWalletModule::wallet_create(
     const std::string& password,

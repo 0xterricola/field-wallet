@@ -749,6 +749,111 @@ void FieldWalletBackend::createNamedWallet(
 
 
 
+void FieldWalletBackend::restoreNamedWallet(
+    QString walletName,
+    QString mnemonic,
+    QString password,
+    QString sequencerAddr)
+{
+    if (accountBusy() ||
+        walletBusy() ||
+        walletSwitchBusy()) {
+        return;
+    }
+
+    walletName = walletName.trimmed();
+    mnemonic = mnemonic.simplified();
+
+    if (walletName.isEmpty() ||
+        mnemonic.isEmpty() ||
+        password.isEmpty()) {
+        return;
+    }
+
+    setWalletError(QString());
+    setWalletBusy(true);
+
+    m_logos
+        ->field_wallet
+        .wallet_restore_namedAsyncResult(
+            walletName,
+            mnemonic,
+            password,
+            sequencerAddr.trimmed(),
+            [this](logos::AsyncResult<QString> outcome) {
+                if (!outcome.ok()) {
+                    setWalletError(
+                        QStringLiteral("restore transport: ") +
+                        QString::fromStdString(
+                            outcome.error.message));
+                    setWalletBusy(false);
+                    return;
+                }
+
+                QJsonObject result;
+
+                if (!parseObject(
+                        outcome.value,
+                        result)) {
+                    setWalletError(
+                        QStringLiteral(
+                            "restore: invalid response"));
+                    setWalletBusy(false);
+                    return;
+                }
+
+                if (!result
+                         .value(QStringLiteral("ok"))
+                         .toBool()) {
+                    QString message =
+                        QStringLiteral("restore: ") +
+                        resultCode(
+                            result,
+                            QStringLiteral(
+                                "unknown error"));
+
+                    if (result
+                            .value(
+                                QStringLiteral(
+                                    "restartRequired"))
+                            .toBool()) {
+                        message +=
+                            QStringLiteral(
+                                " — restart Field before retrying");
+                    }
+
+                    setWalletError(message);
+                    setWalletBusy(false);
+                    return;
+                }
+
+                setWalletState(
+                    QStringLiteral("open"));
+
+                setConfigPath(
+                    result.value(
+                        QStringLiteral("configPath"))
+                        .toString());
+
+                setStoragePath(
+                    result.value(
+                        QStringLiteral("storagePath"))
+                        .toString());
+
+                // Imported recovery material already belongs to the user.
+                // Do not enter the new-wallet backup acknowledgement flow.
+                setRecoveryPhrase(QString());
+
+                loadSavedWallets();
+                clearAccountData();
+                loadAccountsAndBalance();
+
+                setWalletBusy(false);
+            },
+            Timeout(300000));
+}
+
+
 void FieldWalletBackend::renameWallet(
     QString storagePath,
     QString displayName)

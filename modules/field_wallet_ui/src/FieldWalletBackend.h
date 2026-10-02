@@ -35,6 +35,12 @@ public slots:
         QString password,
         QString sequencerAddr) override;
 
+    void restoreNamedWallet(
+        QString walletName,
+        QString mnemonic,
+        QString password,
+        QString sequencerAddr) override;
+
     void openWallet(
         QString configPath,
         QString storagePath) override;
