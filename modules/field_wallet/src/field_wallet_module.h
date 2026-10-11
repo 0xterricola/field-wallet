@@ -21,6 +21,12 @@ public:
     /// Returns the version reported by the underlying LEZ Core module.
     std::string lez_core_version();
 
+    /// Return whether a compatible Secure-Channel-V2 Keycard is connected.
+    bool keycard_available();
+
+    /// Verify a Keycard PIN and derive its public LEE account for this key path.
+    std::string keycard_get_public_account(const std::string& pin, const std::string& key_path);
+
     /// Diagnostic representation of the authenticated Logos caller.
     std::string caller_identity();
 
@@ -31,11 +37,17 @@ public:
     /// Create Field's default LEZ wallet and return its recovery mnemonic.
     std::string wallet_create(const std::string& password, const std::string& sequencer_addr);
 
+    /// Confirm that the recovery phrase has been backed up.
+    std::string wallet_confirm_recovery_backup();
+
     /// List Field-managed wallet vaults available on disk.
     std::string wallet_list_saved();
 
     /// Create another named Field wallet without replacing an existing wallet.
     std::string wallet_create_named(const std::string& wallet_name, const std::string& password, const std::string& sequencer_addr);
+
+    /// Restore a recovery phrase into a new Field-managed wallet.
+    std::string wallet_restore_named(const std::string& wallet_name, const std::string& mnemonic, const std::string& password, const std::string& sequencer_addr);
 
     /// Open an existing LEZ wallet for Field.
     std::string wallet_open(const std::string& config_path, const std::string& storage_path);
@@ -105,6 +117,9 @@ public:
     std::string approval_execute_transaction(
         uint64_t request_id);
 
+    /// Execute one approved public transfer using the connected Keycard.
+    std::string approval_execute_transaction_keycard(uint64_t request_id, const std::string& pin);
+
     /// Grant one capability from an authenticated pending dApp request.
     std::string approval_grant_request(
         const std::string& caller_key,
@@ -123,9 +138,15 @@ protected:
     void onContextReady() override;
 
 private:
+    std::string approval_execute_transaction_impl(uint64_t request_id, const std::string* keycard_pin);
+
     bool wallet_open_ = false;
     std::string current_config_path_;
     std::string current_storage_path_;
+
+    // Session-only Keycard metadata. No PIN or secret material is retained.
+    std::string keycard_account_id_;
+    std::string keycard_key_path_;
 
     field::ProviderState provider_state_;
     field::AccessRequestStore access_requests_;

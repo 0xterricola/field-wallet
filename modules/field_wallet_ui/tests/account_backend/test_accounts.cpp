@@ -1,5 +1,7 @@
 #include "FieldWalletBackend.h"
 #include "logos_sdk.h"
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QtTest/QTest>
@@ -181,6 +183,152 @@ private slots:
         backend.refreshWallet();
         QCOMPARE(backend.accountId(), publicId);
     }
+    void approvalListLoadsPendingTransaction() {
+        auto& state = account_test::state;
+
+        state.approvalListReply =
+            account_test::encode({
+                {"ok", true},
+                {"requests", QJsonArray{
+                    QJsonObject{
+                        {"requestId", static_cast<qint64>(41)},
+                        {"type", "public_native_transfer"},
+                        {"callerKey", "module|4:test|0:"},
+                        {"moduleName", "test"},
+                        {"moduleInstance", ""},
+                        {"accountId", publicId},
+                        {"accountKind", "public"},
+                        {"destinationAccountId", otherId},
+                        {"amountLe16Hex",
+                         "01000000000000000000000000000000"}
+                    }
+                }}
+            });
+
+        FieldWalletBackend backend;
+
+        backend.refreshApprovals();
+
+        QVERIFY(!backend.approvalBusy());
+        QVERIFY(backend.approvalError().isEmpty());
+
+        const auto requests =
+            QJsonDocument::fromJson(
+                backend.approvalTransactionsJson().toUtf8())
+                .array();
+
+        QCOMPARE(requests.size(), 1);
+
+        const auto request =
+            requests.first().toObject();
+
+        QCOMPARE(
+            request.value("requestId").toInteger(),
+            qint64(41));
+
+        QCOMPARE(
+            request.value("accountId").toString(),
+            publicId);
+
+        QCOMPARE(
+            request.value("destinationAccountId").toString(),
+            otherId);
+
+        QCOMPARE(
+            request.value("type").toString(),
+            QString("public_native_transfer"));
+    }
+
+    void rejectDispatchesOnlyRejectPath() {
+        FieldWalletBackend backend;
+
+        backend.rejectTransaction(42);
+
+        QCOMPARE(
+            account_test::state.approvalRejects,
+            1);
+
+        QCOMPARE(
+            account_test::state.approvalExecutes,
+            0);
+
+        QCOMPARE(
+            account_test::state.approvalKeycardExecutes,
+            0);
+
+        QCOMPARE(
+            account_test::state.lastApprovalRequestId,
+            qulonglong(42));
+
+        QVERIFY(!backend.approvalBusy());
+
+        QVERIFY(
+            backend.approvalResult()
+                .contains("rejected"));
+    }
+
+    void softwareExecutionUsesRegularSignerPath() {
+        FieldWalletBackend backend;
+
+        backend.executeTransaction(43);
+
+        QCOMPARE(
+            account_test::state.approvalExecutes,
+            1);
+
+        QCOMPARE(
+            account_test::state.approvalKeycardExecutes,
+            0);
+
+        QCOMPARE(
+            account_test::state.lastApprovalRequestId,
+            qulonglong(43));
+
+        QVERIFY(!backend.approvalBusy());
+        QVERIFY(backend.approvalError().isEmpty());
+
+        QVERIFY(
+            backend.approvalResult()
+                .contains("executed"));
+    }
+
+    void keycardExecutionRequiresPinAndUsesHardwarePath() {
+        FieldWalletBackend backend;
+
+        backend.executeKeycardTransaction(
+            44,
+            QString());
+
+        QCOMPARE(
+            account_test::state.approvalKeycardExecutes,
+            0);
+
+        QVERIFY(!backend.approvalError().isEmpty());
+
+        backend.executeKeycardTransaction(
+            44,
+            QStringLiteral("123456"));
+
+        QCOMPARE(
+            account_test::state.approvalKeycardExecutes,
+            1);
+
+        QCOMPARE(
+            account_test::state.approvalExecutes,
+            0);
+
+        QCOMPARE(
+            account_test::state.lastKeycardRequestId,
+            qulonglong(44));
+
+        QVERIFY(!backend.approvalBusy());
+        QVERIFY(backend.approvalError().isEmpty());
+
+        QVERIFY(
+            backend.approvalResult()
+                .contains("executed"));
+    }
+
 };
 QTEST_GUILESS_MAIN(AccountTests)
 #include "test_accounts.moc"

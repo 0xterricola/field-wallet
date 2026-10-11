@@ -1,0 +1,92 @@
+--- a/src/lez_core_module.h
++++ b/src/lez_core_module.h
+@@ -71,6 +71,7 @@
+     // A fresh public account is claimed by its first funded transfer (`to` owned by
+     // this wallet); there is no separate registration under fees.
+     std::string transfer_public(const std::string& from_hex, const std::string& to_hex, const std::string& amount_le16_hex);
++    std::string transfer_public_keycard(const std::string& from_hex, const std::string& to_hex, const std::string& amount_le16_hex, const std::string& pin, const std::string& key_path);
+     std::string transfer_shielded(const std::string& from_hex, const std::string& to_keys_json, const std::string& amount_le16_hex);
+     std::string transfer_deshielded(const std::string& from_hex, const std::string& to_hex, const std::string& amount_le16_hex);
+     std::string transfer_private(const std::string& from_hex, const std::string& to_keys_json, const std::string& amount_le16_hex);
+--- a/src/lez_core_module.cpp
++++ b/src/lez_core_module.cpp
+@@ -651,6 +651,79 @@
+     return resultJson;
+ }
+ 
++std::string LEZCoreModule::transfer_public_keycard(
++    const std::string& from_hex,
++    const std::string& to_hex,
++    const std::string& amount_le16_hex,
++    const std::string& pin,
++    const std::string& key_path
++) {
++    FfiBytes32 fromId{}, toId{};
++
++    if (!hexToBytes32(from_hex, &fromId) ||
++        !hexToBytes32(to_hex, &toId)) {
++        fprintf(
++            stderr,
++            "transfer_public_keycard: invalid account id hex\n");
++
++        return transferResultToJson(
++            nullptr,
++            "transfer_public_keycard: invalid account id hex");
++    }
++
++    if (pin.empty() || key_path.empty()) {
++        return transferResultToJson(
++            nullptr,
++            "transfer_public_keycard: missing Keycard credentials");
++    }
++
++    uint8_t amount[16];
++
++    if (!hexToU128(amount_le16_hex, &amount)) {
++        fprintf(
++            stderr,
++            "transfer_public_keycard: amount_le16_hex must be 32 hex characters (16 bytes)\n");
++
++        return transferResultToJson(
++            nullptr,
++            "transfer_public_keycard: amount_le16_hex must be 32 hex characters (16 bytes)");
++    }
++
++    FfiTransferResult result{};
++
++    const WalletFfiError error =
++        wallet_ffi_transfer_public_keycard(
++            walletHandle,
++            &fromId,
++            &toId,
++            &amount,
++            pin.c_str(),
++            key_path.c_str(),
++            &result);
++
++    if (error != SUCCESS) {
++        fprintf(
++            stderr,
++            "transfer_public_keycard: wallet FFI error %d\n",
++            error);
++
++        return transferResultToJson(
++            nullptr,
++            "transfer_public_keycard: wallet FFI error " +
++                std::to_string(error));
++    }
++
++    std::string resultJson =
++        transferResultToJson(
++            &result,
++            std::string());
++
++    wallet_ffi_free_transfer_result(&result);
++
++    return resultJson;
++}
++
++
+ std::string LEZCoreModule::transfer_shielded(
+     const std::string& from_hex,
+     const std::string& to_keys_json,

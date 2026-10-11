@@ -35,6 +35,12 @@ public slots:
         QString password,
         QString sequencerAddr) override;
 
+    void restoreNamedWallet(
+        QString walletName,
+        QString mnemonic,
+        QString password,
+        QString sequencerAddr) override;
+
     void openWallet(
         QString configPath,
         QString storagePath) override;
@@ -53,6 +59,14 @@ public slots:
     void renameAccount(QString accountId, QString displayName) override;
     void createPublicAccount() override;
     void createPrivateAccount() override;
+
+    void refreshKeycard() override;
+    void connectKeycard(QString pin) override;
+
+    void refreshApprovals() override;
+    void rejectTransaction(qulonglong requestId) override;
+    void executeTransaction(qulonglong requestId) override;
+    void executeKeycardTransaction(qulonglong requestId, QString pin) override;
 
 private:
     void clearAccountData();

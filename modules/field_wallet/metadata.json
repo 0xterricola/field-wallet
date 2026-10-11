@@ -20,7 +20,11 @@
       "build": [],
       "runtime": ["nlohmann_json"]
     },
-    "external_libraries": [],
+    "external_libraries": [
+      {
+        "name": "wallet_ffi"
+      }
+    ],
     "cmake": {
       "find_packages": [],
       "extra_sources": [],

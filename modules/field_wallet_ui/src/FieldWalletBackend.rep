@@ -22,11 +22,22 @@ class FieldWalletBackend
     PROP(bool walletBusy READONLY)
     PROP(bool walletSwitchBusy READONLY)
 
+    PROP(bool keycardAvailable READONLY)
+    PROP(bool keycardBusy READONLY)
+    PROP(QString keycardAccountId READONLY)
+    PROP(QString keycardError READONLY)
+
+    PROP(QString approvalTransactionsJson READONLY)
+    PROP(bool approvalBusy READONLY)
+    PROP(QString approvalError READONLY)
+    PROP(QString approvalResult READONLY)
+
     SLOT(QString ping())
     SLOT(void refreshWallet())
     SLOT(void chooseWalletFolder())
     SLOT(void createWallet(QString password, QString sequencerAddr))
     SLOT(void createNamedWallet(QString walletName, QString password, QString sequencerAddr))
+    SLOT(void restoreNamedWallet(QString walletName, QString mnemonic, QString password, QString sequencerAddr))
     SLOT(void openWallet(QString configPath, QString storagePath))
     SLOT(void switchWallet(QString configPath, QString storagePath))
     SLOT(void renameWallet(QString storagePath, QString displayName))
@@ -35,4 +46,12 @@ class FieldWalletBackend
     SLOT(void renameAccount(QString accountId, QString displayName))
     SLOT(void createPublicAccount())
     SLOT(void createPrivateAccount())
+
+    SLOT(void refreshKeycard())
+    SLOT(void connectKeycard(QString pin))
+
+    SLOT(void refreshApprovals())
+    SLOT(void rejectTransaction(qulonglong requestId))
+    SLOT(void executeTransaction(qulonglong requestId))
+    SLOT(void executeKeycardTransaction(qulonglong requestId, QString pin))
 }
