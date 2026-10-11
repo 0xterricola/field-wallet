@@ -33,4 +33,6 @@ logos_module(
         src/transaction_request_persistence.h
         src/transaction_request_repository.h
         src/transaction_state.h
+    EXTERNAL_LIBS
+        wallet_ffi
 )

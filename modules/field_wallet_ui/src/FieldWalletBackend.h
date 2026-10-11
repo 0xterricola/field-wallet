@@ -60,6 +60,14 @@ public slots:
     void createPublicAccount() override;
     void createPrivateAccount() override;
 
+    void refreshKeycard() override;
+    void connectKeycard(QString pin) override;
+
+    void refreshApprovals() override;
+    void rejectTransaction(qulonglong requestId) override;
+    void executeTransaction(qulonglong requestId) override;
+    void executeKeycardTransaction(qulonglong requestId, QString pin) override;
+
 private:
     void clearAccountData();
     void loadAccountsAndBalance(const QString& preferredAccountId = QString());

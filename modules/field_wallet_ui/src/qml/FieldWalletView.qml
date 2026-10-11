@@ -14,12 +14,86 @@ Rectangle {
     readonly property var backend: logos ? logos.module("field_wallet_ui") : null
     property bool advancedMode: false
     property bool walletHomeVisible: false
+    property string walletHomeNotice: ""
+
+    readonly property bool walletHomeMode:
+        walletState === "configured"
+        || walletHomeVisible
+
     readonly property string currentWalletLabel:
         activeWalletName()
-    property bool approvalVisible: false
+
+    readonly property var approvalTransactions:
+        parseSavedWallets(
+            backend && backend.approvalTransactionsJson
+                ? backend.approvalTransactionsJson
+                : "[]")
+
+    readonly property var activeApproval:
+        approvalTransactions.length > 0
+            ? approvalTransactions[0]
+            : null
+
+    readonly property bool approvalVisible:
+        activeApproval !== null
+
+    readonly property bool approvalIsKeycard:
+        !!(activeApproval
+            && backend
+            && backend.keycardAccountId
+            && backend.keycardAccountId.length > 0
+            && activeApproval.accountId === backend.keycardAccountId)
+
+    readonly property bool approvalBusy:
+        !!(backend && backend.approvalBusy)
+
+    readonly property string approvalError:
+        backend && backend.approvalError
+            ? backend.approvalError
+            : ""
+
     property bool showOpenFields: false
+    property bool showCreateAnother: false
     property bool showKeycardConnect: false
+    property bool showKeycardDetails: false
+
+    Connections {
+        target: root.backend
+
+        function onKeycardAccountIdChanged() {
+            if (!root.backend
+                    || root.backend.keycardAccountId.length !== 64) {
+                root.showKeycardDetails = false
+            }
+        }
+    }
+
+    // A failed presence check locks the hardware dashboard.
+    // This does not establish continuous card-identity verification.
+    Timer {
+        id: keycardPresenceTimer
+        interval: 3000
+        repeat: true
+        running: !!root.backend
+            && root.backend.keycardAccountId.length === 64
+
+        onTriggered: {
+            if (root.backend && !root.backend.keycardBusy)
+                root.backend.refreshKeycard()
+        }
+    }
+
+    readonly property string displayedAccountId:
+        showKeycardDetails && backend
+            ? backend.keycardAccountId
+            : liveAccountId
+
+    // Never display a software account's balance as a Keycard balance.
+    // Hardware balance retrieval will be implemented separately.
+    readonly property string displayedBalanceRaw:
+        showKeycardDetails ? "" : liveBalanceRaw
     property bool privacyMode: false
+
 
     Shortcut {
         sequences: [
@@ -149,6 +223,45 @@ Rectangle {
             && wallet.storagePath === backend.storagePath
     }
 
+    function requestWalletOpen(wallet) {
+        if (!backend || !wallet)
+            return
+
+        walletHomeNotice = ""
+
+        // Already-current wallet: simply return to it.
+        if (walletState === "open"
+                && walletMatches(wallet)) {
+            walletHomeVisible = false
+            return
+        }
+
+        // LEZ 0.3 owns one live wallet handle per session.
+        // Do not attempt a fake hot switch.
+        if (walletState === "open") {
+            walletHomeVisible = true
+            walletHomeNotice =
+                "Restart Field Wallet, then open "
+                + (wallet.name || "this wallet")
+                + "."
+            return
+        }
+
+        // No live wallet handle yet: cold-open normally.
+        runOperation(
+            "Opening wallet…",
+            function() {
+                backend.openWallet(
+                    wallet.configPath,
+                    wallet.storagePath)
+
+                if (!backend.walletError
+                        || backend.walletError.length === 0) {
+                    walletHomeVisible = false
+                }
+            })
+    }
+
     function activeWalletName() {
         for (var i = 0; i < savedWallets.length; ++i) {
             if (walletMatches(savedWallets[i]))
@@ -244,6 +357,11 @@ Rectangle {
             backend.refreshWallet()
     }
 
+    function refreshApprovals() {
+        if (backend && !backend.approvalBusy)
+            backend.refreshApprovals()
+    }
+
     function runOperation(label, action) {
         if (operationPending)
             return
@@ -278,7 +396,17 @@ Rectangle {
     Component.onCompleted: {
         Qt.callLater(function() {
             root.refreshWallet()
+            root.refreshApprovals()
         })
+    }
+
+    Timer {
+        interval: 2000
+        repeat: true
+        running: root.walletState === "open" && !!root.backend
+
+        onTriggered:
+            root.refreshApprovals()
     }
 
     Connections {
@@ -292,6 +420,7 @@ Rectangle {
                 isReady) {
                 Qt.callLater(function() {
                     root.refreshWallet()
+                    root.refreshApprovals()
                 })
             }
         }
@@ -306,7 +435,7 @@ Rectangle {
 
     Image {
         id: openWalletHero
-        visible: root.walletState === "open"
+        visible: root.walletState === "open" || root.showKeycardDetails
         anchors.fill: parent
         source: Qt.resolvedUrl(
             "assets/branding/field-hero.png")
@@ -319,7 +448,7 @@ Rectangle {
     }
 
     Rectangle {
-        visible: root.walletState === "open"
+        visible: root.walletState === "open" || root.showKeycardDetails
         anchors.fill: parent
         color: "#9A080B0F"
     }
@@ -350,9 +479,11 @@ Rectangle {
         id: walletScroll
 
         visible:
-            root.walletState === "open"
-            && root.hasAccount
-            && root.recoveryPhrase.length === 0
+            root.recoveryPhrase.length === 0
+            && (root.showKeycardDetails
+                ? !!root.backend
+                  && root.backend.keycardAccountId.length === 64
+                : root.walletState === "open" && root.hasAccount)
 
         anchors.fill: parent
         clip: true
@@ -547,6 +678,7 @@ Rectangle {
 
                         Button {
                             id: accountSelector
+                            visible: !root.showKeycardDetails
                             objectName: "accountSelector"
                             text: "Accounts (" + root.accounts.length + ")  ▾"
                             enabled: root.accountControlsEnabled
@@ -610,6 +742,7 @@ Rectangle {
 
                         Button {
                             id: addAccountButton
+                            visible: !root.showKeycardDetails
                             objectName: "addAccountButton"
                             text: "+ Add account"
                             enabled: root.accountControlsEnabled && root.accountsLoaded
@@ -660,12 +793,14 @@ Rectangle {
                         }
                     }
                     Text {
-                        text: root.selectedAccountName() + " · " + root.accountSummary()
+                        text: root.showKeycardDetails
+                            ? "Keycard · Hardware-backed account"
+                            : root.selectedAccountName() + " · " + root.accountSummary()
                         color: root.primary
                         font.pixelSize: 12
                     }
                     Text {
-                        text: root.shortAccount(root.liveAccountId)
+                        text: root.shortAccount(root.displayedAccountId)
                         color: root.secondary
                         font.family: "Monospace"
                         font.pixelSize: 13
@@ -682,7 +817,9 @@ Rectangle {
                         Text {
                             id: accountKindText
                             anchors.centerIn: parent
-                            text: root.accountKindLabel()
+                            text: root.showKeycardDetails
+                                ? "Hardware · Keycard"
+                                : root.accountKindLabel()
                             color: root.cyan
                             font.pixelSize: 11
                             font.weight: Font.Medium
@@ -695,8 +832,8 @@ Rectangle {
                 ColumnLayout {
                     Text {
                         Layout.alignment: Qt.AlignRight
-                        text: root.liveBalanceRaw.length
-                            ? root.liveBalanceRaw
+                        text: root.displayedBalanceRaw.length
+                            ? root.displayedBalanceRaw
                             : "—"
                         color: root.primary
                         font.pixelSize: 36
@@ -787,8 +924,8 @@ Rectangle {
                             {
                                 symbol: "LGO",
                                 name: "Logos",
-                                amount: root.liveBalanceRaw.length
-                                    ? root.liveBalanceRaw
+                                amount: root.displayedBalanceRaw.length
+                                    ? root.displayedBalanceRaw
                                     : "—"
                             }
                         ]
@@ -944,6 +1081,7 @@ Rectangle {
             && (root.walletHomeVisible
                 || root.walletState !== "open")
             && root.walletState !== "recovery_pending"
+            && !root.showKeycardDetails
 
         anchors.fill: parent
         color: root.color
@@ -1044,7 +1182,7 @@ Rectangle {
                 Layout.fillWidth: true
                 visible: text.length > 0
                 text:
-                    root.walletState === "configured"
+                    root.walletHomeMode
                         ? (root.showKeycardConnect
                                 ? "Connect Keycard Card"
                                 : root.importMode === "choose"
@@ -1150,6 +1288,14 @@ Repeater {
                         id: walletCard
                         required property var modelData
                         property bool addressCopied: false
+                        readonly property bool isCurrent:
+                            root.walletState === "open"
+                            && root.walletMatches(modelData)
+
+                        readonly property bool requiresRestart:
+                            root.walletState === "open"
+                            && !isCurrent
+
                         property bool renaming: false
 
                         Layout.fillWidth: true
@@ -1491,57 +1637,40 @@ Repeater {
                             }
 
                             Rectangle {
-                                Layout.preferredWidth: 82
+                                Layout.preferredWidth: 132
                                 Layout.preferredHeight: 34
 
                                 radius: 11
-                                color: "#16302b"
+                                color:
+                                    walletCard.requiresRestart
+                                        ? "#2b2418"
+                                        : "#16302b"
                                 border.width: 1
-                                border.color: "#2d786b"
+                                border.color:
+                                    walletCard.requiresRestart
+                                        ? "#8a6a32"
+                                        : "#2d786b"
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Open"
+                                    text:
+                                        walletCard.isCurrent
+                                            ? "Current"
+                                            : walletCard.requiresRestart
+                                                ? "Restart required"
+                                                : "Open"
                                     color: root.primary
                                     font.pixelSize: 13
                                     font.weight: Font.DemiBold
                                 }
 
                                 MouseArea {
-                                    cursorShape: Qt.PointingHandCursor; anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    anchors.fill: parent
 
-                                    onClicked: {
-                                        var wallet =
-                                            parent.parent.parent
-                                                .modelData
-
-                                        if (!root.backend)
-                                            return
-
-                                        if (root.walletState === "open"
-                                                && root.walletMatches(wallet)) {
-                                            root.walletHomeVisible = false
-                                            return
-                                        }
-
-                                        root.runOperation(
-                                            root.walletState === "open"
-                                                ? "Switching wallet…"
-                                                : "Opening wallet…",
-                                            function() {
-                                                if (root.walletState === "open") {
-                                                    root.backend.switchWallet(
-                                                        wallet.configPath,
-                                                        wallet.storagePath)
-                                                } else {
-                                                    root.backend.openWallet(
-                                                        wallet.configPath,
-                                                        wallet.storagePath)
-                                                }
-
-                                                root.walletHomeVisible = false
-                                            })
-                                    }
+                                    onClicked:
+                                        root.requestWalletOpen(
+                                            walletCard.modelData)
                                 }
                             }
                         }
@@ -1649,6 +1778,307 @@ Repeater {
             }
 
             // ------------------------------------------------------
+            // Create another named wallet
+            // ------------------------------------------------------
+
+            Text {
+                visible:
+                    root.walletHomeMode
+                    && root.walletHomeNotice.length > 0
+                    && !root.showCreateAnother
+                    && !root.showKeycardConnect
+                    && root.importMode.length === 0
+
+                Layout.fillWidth: true
+
+                text: root.walletHomeNotice
+                color: "#d9b36c"
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+            }
+
+            Rectangle {
+                id: namedWalletCreateButton
+
+                visible:
+                    root.walletHomeMode
+                    && root.hasSavedWallets
+                    && !root.showCreateAnother
+                    && !root.showKeycardConnect
+                    && root.importMode.length === 0
+
+                Layout.fillWidth: true
+                Layout.preferredHeight:
+                    root.onboardingControlHeight
+
+                radius: root.onboardingControlRadius
+                color: root.panel
+                border.width: 1
+                border.color: root.line
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "+ Create wallet"
+                    color: root.primary
+                    font.pixelSize: 14
+                    font.weight: Font.DemiBold
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+
+                    onClicked: {
+                        newWalletNameField.text = ""
+                        newWalletPasswordField.text = ""
+                        newWalletSequencerField.text = ""
+                        root.showCreateAnother = true
+                    }
+                }
+            }
+
+            ColumnLayout {
+                visible:
+                    root.walletHomeMode
+                    && root.showCreateAnother
+                    && !root.showKeycardConnect
+                    && root.importMode.length === 0
+
+                Layout.fillWidth: true
+                spacing: root.onboardingSectionGap
+
+                Text {
+                    Layout.fillWidth: true
+                    text: "Create a wallet"
+                    color: root.primary
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
+                }
+
+                TextField {
+                    id: newWalletNameField
+
+                    Layout.fillWidth: true
+                    placeholderText: "Wallet name, e.g. switchtest"
+                    color: root.primary
+                    placeholderTextColor: root.secondary
+
+                    background: Rectangle {
+                        radius: 11
+                        color: root.panel
+                        border.width: 1
+
+                        border.color:
+                            newWalletNameField.text.length === 0
+                            || root.validWalletName(
+                                newWalletNameField.text.trim())
+                                ? root.line
+                                : "#7e4949"
+                    }
+                }
+
+                TextField {
+                    id: newWalletPasswordField
+
+                    Layout.fillWidth: true
+                    placeholderText: "Wallet password"
+                    echoMode: TextInput.Password
+                    color: root.primary
+                    placeholderTextColor: root.secondary
+
+                    background: Rectangle {
+                        radius: 11
+                        color: root.panel
+                        border.width: 1
+                        border.color: root.line
+                    }
+                }
+
+                TextField {
+                    id: newWalletSequencerField
+
+                    Layout.fillWidth: true
+                    placeholderText:
+                        "Sequencer URL (blank = Logos testnet)"
+                    color: root.primary
+                    placeholderTextColor: root.secondary
+
+                    background: Rectangle {
+                        radius: 11
+                        color: root.panel
+                        border.width: 1
+                        border.color: root.line
+                    }
+                }
+
+                Rectangle {
+                    id: createNamedWalletButton
+
+                    property bool canCreate:
+                        root.backend
+                        && root.validWalletName(
+                            newWalletNameField.text.trim())
+                        && newWalletPasswordField.text.length > 0
+                        && !root.backend.walletBusy
+                        && !root.backend.walletSwitchBusy
+
+                    Layout.fillWidth: true
+                    Layout.preferredHeight:
+                        root.onboardingControlHeight
+
+                    radius: root.onboardingControlRadius
+
+                    color:
+                        canCreate
+                            ? "#16302b"
+                            : "#171c22"
+
+                    border.width: 1
+
+                    border.color:
+                        canCreate
+                            ? "#2d786b"
+                            : root.line
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Create wallet"
+
+                        color:
+                            createNamedWalletButton.canCreate
+                                ? root.primary
+                                : root.secondary
+
+                        font.pixelSize: 14
+                        font.weight: Font.DemiBold
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled:
+                            createNamedWalletButton.canCreate
+
+                        cursorShape:
+                            createNamedWalletButton.canCreate
+                                ? Qt.PointingHandCursor
+                                : Qt.ArrowCursor
+
+                        onClicked: {
+                            root.runOperation(
+                                "Creating wallet…",
+                                function() {
+                                    root.backend.createNamedWallet(
+                                        newWalletNameField.text.trim(),
+                                        newWalletPasswordField.text,
+                                        newWalletSequencerField.text.trim())
+                                })
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight:
+                        root.onboardingControlHeight
+
+                    radius: root.onboardingControlRadius
+                    color: "transparent"
+                    border.width: 1
+                    border.color: root.line
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Cancel"
+                        color: root.secondary
+                        font.pixelSize: 14
+                        font.weight: Font.DemiBold
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+
+                        onClicked: {
+                            newWalletNameField.text = ""
+                            newWalletPasswordField.text = ""
+                            newWalletSequencerField.text = ""
+                            root.showCreateAnother = false
+                        }
+                    }
+                }
+            }
+
+            // Connected Keycard hardware account.
+            // Kept separate from saved software wallets.
+            Rectangle {
+                visible: root.walletHomeMode
+                    && !root.showKeycardConnect
+                    && root.importMode.length === 0
+                    && !!root.backend
+                    && root.backend.keycardAccountId.length === 64
+
+                Layout.fillWidth: true
+                Layout.preferredHeight: root.onboardingWalletCardHeight
+                radius: 14
+                color: "#30231D"
+                border.width: 1
+                border.color: "#ED6E2D"
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 12
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 5
+
+                        Text {
+                            text: "KEYCARD 4.0"
+                            color: "#FF995C"
+                            font.pixelSize: 15
+                            font.weight: Font.DemiBold
+                        }
+
+                        Text {
+                            text: "Hardware account · "
+                                + root.shortAccount(
+                                    root.backend
+                                        ? root.backend.keycardAccountId
+                                        : "")
+                            color: root.secondary
+                            font.family: "Monospace"
+                            font.pixelSize: 12
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.preferredWidth: 100
+                        Layout.preferredHeight: 36
+                        radius: 10
+                        color: "#ED6E2D"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Open"
+                            color: "#fff8f4"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.showKeycardDetails = true
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ------------------------------------------------------
             // Keycard hardware wallet
             // ------------------------------------------------------
 
@@ -1691,7 +2121,11 @@ Repeater {
                     cursorShape: Qt.PointingHandCursor; anchors.fill: parent
 
                     onClicked: {
+                        keycardPinField.text = ""
                         root.showKeycardConnect = true
+
+                        if (root.backend)
+                            root.backend.refreshKeycard()
                     }
                 }
             }
@@ -1703,12 +2137,10 @@ Repeater {
 
                 Text {
                     Layout.fillWidth: true
-
                     text:
-                        "Insert your Keycard Card 4.0 into a compatible USB smart-card reader. "
-                        + "Keep the card inserted while Field "
-                        + "communicates with it."
-
+                        "Insert your Keycard Card 4.0 into a compatible "
+                        + "USB smart-card reader. Keep the card inserted "
+                        + "while Field communicates with it."
                     color: root.secondary
                     font.pixelSize: 13
                     wrapMode: Text.WordWrap
@@ -1722,7 +2154,10 @@ Repeater {
                     radius: root.onboardingCardRadius
                     color: root.panel
                     border.width: 1
-                    border.color: root.line
+                    border.color:
+                        backend && backend.keycardAvailable
+                            ? root.cyan
+                            : root.line
 
                     RowLayout {
                         anchors.fill: parent
@@ -1741,18 +2176,82 @@ Repeater {
                             }
 
                             Text {
-                                text: "USB smart-card reader"
-                                color: root.secondary
+                                text:
+                                    backend && backend.keycardBusy
+                                        ? "Checking USB smart-card reader…"
+                                        : backend && backend.keycardAvailable
+                                            ? "Compatible card detected"
+                                            : "No compatible card detected"
+                                color:
+                                    backend && backend.keycardAvailable
+                                        ? root.cyan
+                                        : root.secondary
                                 font.pixelSize: 12
                             }
                         }
 
                         Text {
-                            text: "USB reader"
+                            text:
+                                backend && backend.keycardAvailable
+                                    ? "Ready"
+                                    : "Refresh"
                             color: root.cyan
                             font.pixelSize: 12
                             font.weight: Font.DemiBold
                         }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled:
+                                root.backend
+                                && !root.backend.keycardBusy
+                            cursorShape:
+                                enabled
+                                    ? Qt.PointingHandCursor
+                                    : Qt.ArrowCursor
+
+                            onClicked:
+                                root.backend.refreshKeycard()
+                        }
+                    }
+                }
+
+                TextField {
+                    id: keycardPinField
+
+                    Layout.fillWidth: true
+                    placeholderText: "Keycard PIN"
+                    echoMode: TextInput.Password
+                    color: root.primary
+                    placeholderTextColor: root.secondary
+
+                    enabled:
+                        backend
+                        && backend.keycardAvailable
+                        && !backend.keycardBusy
+
+                    background: Rectangle {
+                        radius: root.onboardingControlRadius
+                        color: root.panel
+                        border.width: 1
+                        border.color:
+                            keycardPinField.activeFocus
+                                ? root.cyan
+                                : root.line
+                    }
+
+                    Keys.onReturnPressed: {
+                        if (!root.backend
+                                || !root.backend.keycardAvailable
+                                || root.backend.keycardBusy
+                                || keycardPinField.text.length === 0) {
+                            return
+                        }
+
+                        var pin = keycardPinField.text
+                        keycardPinField.text = ""
+                        root.backend.connectKeycard(pin)
+                        pin = ""
                     }
                 }
 
@@ -1762,29 +2261,104 @@ Repeater {
                         root.onboardingControlHeight
 
                     radius: root.onboardingControlRadius
-                    color: "#171c22"
-                    border.width: 1
+
+                    readonly property bool canConnect:
+                        backend
+                        && backend.keycardAvailable
+                        && !backend.keycardBusy
+                        && keycardPinField.text.length > 0
+
+                    color:
+                        canConnect
+                            ? "#ED6E2D"
+                            : "#171c22"
+
+                    border.width:
+                        canConnect ? 0 : 1
+
                     border.color: root.line
 
                     Text {
                         anchors.centerIn: parent
-                        text: "Connect Keycard Card"
-                        color: root.secondary
+
+                        text:
+                            backend && backend.keycardBusy
+                                ? "Connecting…"
+                                : "Connect Keycard Card"
+
+                        color:
+                            parent.canConnect
+                                ? "#fff8f4"
+                                : root.secondary
+
                         font.pixelSize: 14
                         font.weight: Font.DemiBold
                     }
 
-                    // Intentionally disabled until USB / smartcard
-                    // transport is wired into Field.
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: parent.canConnect
+
+                        cursorShape:
+                            enabled
+                                ? Qt.PointingHandCursor
+                                : Qt.ArrowCursor
+
+                        onClicked: {
+                            var pin = keycardPinField.text
+                            keycardPinField.text = ""
+                            root.backend.connectKeycard(pin)
+                            pin = ""
+                        }
+                    }
                 }
 
                 Text {
                     Layout.fillWidth: true
-                    text: "This connects the Keycard Card directly through "
-          + "a USB smart-card reader — not the Keycard Shell. "
-          + "USB support is not connected to the Field backend yet."
+
+                    visible:
+                        backend
+                        && backend.keycardAccountId.length > 0
+
+                    text:
+                        "Connected hardware account · "
+                        + root.shortAccount(
+                            backend.keycardAccountId)
+
+                    color: root.cyan
+                    font.pixelSize: 12
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                Text {
+                    Layout.fillWidth: true
+
+                    visible:
+                        backend
+                        && backend.keycardError.length > 0
+
+                    text:
+                        backend
+                            ? backend.keycardError
+                            : ""
+
+                    color: "#d9b36c"
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                Text {
+                    Layout.fillWidth: true
+
+                    text:
+                        "The Keycard stays the signing device. "
+                        + "Field only derives the public LEE account; "
+                        + "no Keycard secret key is imported."
+
                     color: root.secondary
                     font.pixelSize: 12
+                    wrapMode: Text.WordWrap
                     horizontalAlignment: Text.AlignHCenter
                 }
 
@@ -1807,8 +2381,13 @@ Repeater {
                     }
 
                     MouseArea {
-                        cursorShape: Qt.PointingHandCursor; anchors.fill: parent
-                        onClicked: root.showKeycardConnect = false
+                        cursorShape: Qt.PointingHandCursor
+                        anchors.fill: parent
+
+                        onClicked: {
+                            keycardPinField.text = ""
+                            root.showKeycardConnect = false
+                        }
                     }
                 }
             }
@@ -2349,7 +2928,10 @@ Repeater {
 
             Text {
                 Layout.fillWidth: true
-                visible: root.liveError.length > 0
+                visible:
+                    root.liveError.length > 0
+                    && root.liveError
+                        !== "switch: wallet_switch_requires_restart"
                 text: root.liveError
                 color: "#e58b8b"
                 font.pixelSize: 13
@@ -2911,8 +3493,8 @@ Repeater {
         z: 50
 
         Rectangle {
-            width: 410
-            height: 350
+            width: 440
+            height: root.approvalIsKeycard ? 490 : 430
             anchors.centerIn: parent
             radius: 22
             color: "#11161b"
@@ -2924,8 +3506,22 @@ Repeater {
                 anchors.margins: 22
                 spacing: 12
 
-                Text { text: "Transaction request"; color: root.primary; font.pixelSize: 19; font.weight: Font.DemiBold }
-                Text { text: "testimonial  /  verified effect"; color: root.cyan; font.pixelSize: 10 }
+                Text {
+                    text: "Transaction request"
+                    color: root.primary
+                    font.pixelSize: 19
+                    font.weight: Font.DemiBold
+                }
+
+                Text {
+                    text: root.activeApproval
+                        ? (root.activeApproval.moduleName
+                            + " / "
+                            + root.activeApproval.moduleInstance)
+                        : ""
+                    color: root.cyan
+                    font.pixelSize: 10
+                }
 
                 Rectangle {
                     Layout.fillWidth: true
@@ -2937,17 +3533,118 @@ Repeater {
 
                     Column {
                         anchors.centerIn: parent
-                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Send"; color: root.secondary; font.pixelSize: 10 }
-                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: "12 TOK"; color: root.primary; font.pixelSize: 28; font.weight: Font.DemiBold }
-                        Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Token Alpha"; color: root.secondary; font.pixelSize: 10 }
+                        spacing: 4
+
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "Native transfer"
+                            color: root.secondary
+                            font.pixelSize: 10
+                        }
+
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: root.activeApproval
+                                ? root.activeApproval.amountLe16Hex
+                                : ""
+                            color: root.primary
+                            font.family: "Monospace"
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                        }
+
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "raw LE16 amount"
+                            color: root.secondary
+                            font.pixelSize: 9
+                        }
                     }
                 }
 
-                Text { text: "From     Personal  8K4f...d921"; color: root.primary; font.family: "Monospace"; font.pixelSize: 10 }
-                Text { text: "To       3Ac1...91bf"; color: root.primary; font.family: "Monospace"; font.pixelSize: 10 }
-                Text { text: "Program  Token / source verified"; color: root.cyan; font.pixelSize: 10 }
+                Text {
+                    text: root.activeApproval
+                        ? "From     "
+                            + root.shortAccount(root.activeApproval.accountId)
+                            + "  (" + root.activeApproval.accountKind + ")"
+                        : ""
+                    color: root.primary
+                    font.family: "Monospace"
+                    font.pixelSize: 10
+                }
 
-                Item { Layout.fillHeight: true }
+                Text {
+                    text: root.activeApproval
+                        ? "To       "
+                            + root.shortAccount(
+                                root.activeApproval.destinationAccountId)
+                        : ""
+                    color: root.primary
+                    font.family: "Monospace"
+                    font.pixelSize: 10
+                }
+
+                Text {
+                    text: root.activeApproval
+                        ? "Type     "
+                            + String(root.activeApproval.type)
+                                .replace(/_/g, " ")
+                        : ""
+                    color: root.cyan
+                    font.pixelSize: 10
+                }
+
+                Text {
+                    visible: root.approvalIsKeycard
+                    text: "Hardware signer · Keycard"
+                    color: root.violet
+                    font.pixelSize: 10
+                    font.weight: Font.DemiBold
+                }
+
+                TextField {
+                    id: approvalPin
+
+                    visible: root.approvalIsKeycard
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 40
+
+                    placeholderText: "Keycard PIN"
+                    echoMode: TextInput.Password
+                    enabled: !root.approvalBusy
+                    selectByMouse: true
+
+                    onAccepted: {
+                        if (!root.activeApproval
+                                || !root.backend
+                                || root.approvalBusy
+                                || text.length === 0)
+                            return
+
+                        var enteredPin = text
+                        text = ""
+
+                        root.backend.executeKeycardTransaction(
+                            root.activeApproval.requestId,
+                            enteredPin)
+
+                        enteredPin = ""
+                    }
+                }
+
+                Text {
+                    visible: root.approvalError.length > 0
+                    Layout.fillWidth: true
+
+                    text: root.approvalError
+                    color: "#ff8b8b"
+                    font.pixelSize: 9
+                    wrapMode: Text.Wrap
+                }
+
+                Item {
+                    Layout.fillHeight: true
+                }
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -2961,9 +3658,29 @@ Repeater {
                         color: "#171c22"
                         border.width: 1
                         border.color: root.line
-                        Text { anchors.centerIn: parent; text: "Reject"; color: root.primary; font.pixelSize: 11 }
+                        opacity: root.approvalBusy ? 0.5 : 1.0
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Reject"
+                            color: root.primary
+                            font.pixelSize: 11
+                        }
+
                         MouseArea {
-                            cursorShape: Qt.PointingHandCursor; anchors.fill: parent; onClicked: root.approvalVisible = false }
+                            anchors.fill: parent
+                            enabled: !root.approvalBusy
+                            cursorShape: Qt.PointingHandCursor
+
+                            onClicked: {
+                                approvalPin.text = ""
+
+                                if (root.activeApproval
+                                        && root.backend)
+                                    root.backend.rejectTransaction(
+                                        root.activeApproval.requestId)
+                            }
+                        }
                     }
 
                     Rectangle {
@@ -2973,15 +3690,62 @@ Repeater {
                         color: "#16302b"
                         border.width: 1
                         border.color: "#2d786b"
-                        Text { anchors.centerIn: parent; text: "Approve"; color: root.primary; font.pixelSize: 11; font.weight: Font.DemiBold }
+                        opacity: root.approvalBusy ? 0.5 : 1.0
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: root.approvalBusy
+                                ? "Working…"
+                                : root.approvalIsKeycard
+                                    ? "Sign & approve"
+                                    : "Approve"
+                            color: root.primary
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                        }
+
                         MouseArea {
-                            cursorShape: Qt.PointingHandCursor; anchors.fill: parent; onClicked: root.approvalVisible = false }
+                            anchors.fill: parent
+                            enabled: !root.approvalBusy
+                            cursorShape: Qt.PointingHandCursor
+
+                            onClicked: {
+                                if (!root.activeApproval
+                                        || !root.backend)
+                                    return
+
+                                if (root.approvalIsKeycard) {
+                                    if (approvalPin.text.length === 0)
+                                        return
+
+                                    var enteredPin =
+                                        approvalPin.text
+
+                                    approvalPin.text = ""
+
+                                    root.backend
+                                        .executeKeycardTransaction(
+                                            root.activeApproval.requestId,
+                                            enteredPin)
+
+                                    enteredPin = ""
+                                } else {
+                                    approvalPin.text = ""
+
+                                    root.backend
+                                        .executeTransaction(
+                                            root.activeApproval.requestId)
+                                }
+                            }
+                        }
                     }
                 }
 
                 Text {
                     Layout.fillWidth: true
-                    text: "Mock UI only - nothing is submitted yet."
+                    text: root.approvalIsKeycard
+                        ? "PIN is requested only for this hardware signature."
+                        : "Approve executes this pending LEZ transaction."
                     color: "#6f7b88"
                     font.pixelSize: 8
                     horizontalAlignment: Text.AlignHCenter

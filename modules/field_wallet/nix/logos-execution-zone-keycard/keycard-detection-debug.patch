@@ -1,0 +1,59 @@
+--- a/lez/keycard_wallet/src/lib.rs
++++ b/lez/keycard_wallet/src/lib.rs
+@@ -79,16 +79,48 @@
+     /// present.
+     #[must_use]
+     pub fn is_keycard_available() -> bool {
+-        let Ok(channel) = PcscChannel::connect() else {
+-            return false;
++        eprintln!("[Keycard] Starting detection");
++
++        let channel = match PcscChannel::connect() {
++            Ok(channel) => {
++                eprintln!("[Keycard] PC/SC connection successful");
++                channel
++            }
++            Err(error) => {
++                eprintln!("[Keycard] PC/SC connection failed: {error}");
++                return false;
++            }
+         };
+-        let Ok(mut command_set) = Self::build_command_set(channel) else {
+-            return false;
++
++        let mut command_set = match Self::build_command_set(channel) {
++            Ok(command_set) => {
++                eprintln!("[Keycard] Command set initialized");
++                command_set
++            }
++            Err(error) => {
++                eprintln!("[Keycard] Command initialization failed: {error}");
++                return false;
++            }
+         };
+-        if !command_set.select().is_ok_and(|resp| resp.is_ok()) {
+-            return false;
+-        }
+-        command_set.secure_channel_version() == Some(SecureChannelVersion::V2)
++
++        match command_set.select() {
++            Ok(response) if response.is_ok() => {
++                eprintln!("[Keycard] Applet selection successful");
++            }
++            Ok(_) => {
++                eprintln!("[Keycard] Applet selection rejected");
++                return false;
++            }
++            Err(error) => {
++                eprintln!("[Keycard] Applet selection failed: {error}");
++                return false;
++            }
++        }
++
++        let version = command_set.secure_channel_version();
++        eprintln!("[Keycard] Secure channel version: {version:?}");
++
++        version == Some(SecureChannelVersion::V2)
+     }
+ 
+     fn select(&mut self) -> Result<(), KeycardWalletError> {

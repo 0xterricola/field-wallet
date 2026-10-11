@@ -1,0 +1,135 @@
+--- a/lez/wallet/src/account_manager.rs
++++ b/lez/wallet/src/account_manager.rs
+@@ -291,7 +291,7 @@
+ pub struct AccountManager {
+     states: Vec<State>,
+     rows: Vec<Row>,
+-    pin: Option<String>,
++    pin: Option<zeroize::Zeroizing<String>>,
+     dummy_commitment_root: CommitmentSetDigest,
+ }
+ 
+@@ -308,10 +308,17 @@
+         wallet: &WalletCore,
+         mentions: Vec<AccountMention>,
+     ) -> Result<Self, ExecutionFailureKind> {
++        Self::new_with_keycard_pin(wallet, mentions, None).await
++    }
++
++    pub async fn new_with_keycard_pin(
++        wallet: &WalletCore,
++        mentions: Vec<AccountMention>,
++        mut pin: Option<zeroize::Zeroizing<String>>,
++    ) -> Result<Self, ExecutionFailureKind> {
+         let mut states: Vec<State> = Vec::new();
+         let mut rows = Vec::with_capacity(mentions.len());
+         let mut prepared: HashMap<AccountId, (usize, AccountIdentity)> = HashMap::new();
+-        let mut pin = None;
+ 
+         for AccountMention {
+             identity,
+@@ -634,9 +641,9 @@
+             })
+             .collect();
+ 
+-        if let Some(pin) = self.pin.clone() {
++        if let Some(pin) = self.pin.as_ref() {
+             let mut wallet = KeycardWallet::new()?;
+-            wallet.connect(&pin)?;
++            wallet.connect(pin.as_str())?;
+             for path in keycard_paths {
+                 sigs.push(wallet.sign_message_for_path(path, &message_hash)?);
+             }
+@@ -701,7 +708,7 @@
+     wallet: &WalletCore,
+     identity: AccountIdentity,
+     shard_selector: ProgramShardSelector,
+-    pin: &mut Option<String>,
++    pin: &mut Option<zeroize::Zeroizing<String>>,
+ ) -> Result<State, ExecutionFailureKind> {
+     let account_id = shard_selector.account_id;
+     let state = match identity {
+@@ -731,9 +738,7 @@
+             if pin.is_none() {
+                 *pin = Some(
+                     crate::helperfunctions::read_pin()
+-                        .map_err(ExecutionFailureKind::SignError)?
+-                        .as_str()
+-                        .to_owned(),
++                        .map_err(ExecutionFailureKind::SignError)?,
+                 );
+             }
+ 
+--- a/lez/wallet/src/lib.rs
++++ b/lez/wallet/src/lib.rs
+@@ -917,6 +917,26 @@
+         payer: Option<AccountId>,
+         tx_pre_check: impl FnOnce(&[SelectedShard]) -> Result<(), ExecutionFailureKind>,
+     ) -> Result<HashType, ExecutionFailureKind> {
++        self.send_pub_tx_with_pre_check_with_keycard_pin(
++            accounts,
++            instruction_data,
++            program_account_id,
++            payer,
++            None,
++            tx_pre_check,
++        )
++        .await
++    }
++
++    pub async fn send_pub_tx_with_pre_check_with_keycard_pin(
++        &self,
++        accounts: Vec<AccountMention>,
++        instruction_data: InstructionData,
++        program_account_id: AccountId,
++        payer: Option<AccountId>,
++        keycard_pin: Option<zeroize::Zeroizing<String>>,
++        tx_pre_check: impl FnOnce(&[SelectedShard]) -> Result<(), ExecutionFailureKind>,
++    ) -> Result<HashType, ExecutionFailureKind> {
+         // Public transaction, all accounts must be public
+         if accounts.iter().any(|mention| mention.identity.is_private()) {
+             return Err(ExecutionFailureKind::TransactionBuildError(
+@@ -926,7 +946,13 @@
+             ));
+         }
+ 
+-        let mut acc_manager = account_manager::AccountManager::new(self, accounts).await?;
++        let mut acc_manager =
++            account_manager::AccountManager::new_with_keycard_pin(
++                self,
++                accounts,
++                keycard_pin,
++            )
++            .await?;
+ 
+         tx_pre_check(&acc_manager.selected_shards())?;
+ 
+--- a/lez/wallet/src/program_facades/native_token_transfer/public.rs
++++ b/lez/wallet/src/program_facades/native_token_transfer/public.rs
+@@ -26,4 +26,26 @@
+             )
+             .await
+     }
++    pub async fn send_public_transfer_with_keycard_pin(
++        &self,
++        from: AccountIdentity,
++        to: AccountIdentity,
++        balance_to_move: u128,
++        keycard_pin: zeroize::Zeroizing<String>,
++    ) -> Result<HashType, ExecutionFailureKind> {
++        let (instruction_data, tx_pre_check) =
++            native_transfer_preparation(balance_to_move);
++
++        self.0
++            .send_pub_tx_with_pre_check_with_keycard_pin(
++                vec![from.balance(), to.balance()],
++                instruction_data,
++                NATIVE_TOKEN_PROGRAM_ID,
++                None,
++                Some(keycard_pin),
++                tx_pre_check,
++            )
++            .await
++    }
++
+ }

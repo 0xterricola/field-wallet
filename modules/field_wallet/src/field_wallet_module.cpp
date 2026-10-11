@@ -15,6 +15,10 @@
 #include <fstream>
 #include <vector>
 
+extern "C" {
+#include <wallet_ffi.h>
+}
+
 
 FieldWalletModule::FieldWalletModule() = default;
 
@@ -26,7 +30,8 @@ namespace {
 std::optional<std::vector<field::OwnedAccount>>
 loadOwnedAccounts(
     LogosModules& logos_modules,
-    logos::CallError& error)
+    logos::CallError& error,
+    const std::string& keycard_account_id)
 {
     const auto raw =
         logos_modules.lez_core.list_accounts(
@@ -35,11 +40,52 @@ loadOwnedAccounts(
     if (!error.ok())
         return std::nullopt;
 
-    return field::parseOwnedAccounts(raw);
+    auto accounts =
+        field::parseOwnedAccounts(raw);
+
+    if (!accounts.has_value())
+        return std::nullopt;
+
+    if (!keycard_account_id.empty()) {
+        if (!field::isAccountIdHex(
+                keycard_account_id)) {
+            return std::nullopt;
+        }
+
+        if (!field::findOwnedAccount(
+                 *accounts,
+                 keycard_account_id)
+                 .has_value()) {
+            field::OwnedAccount keycard_account;
+            keycard_account.account_id =
+                keycard_account_id;
+            keycard_account.account_kind =
+                field::AccountKind::Public;
+
+            accounts->push_back(
+                std::move(keycard_account));
+        }
+    }
+
+    return accounts;
 }
 
 
 constexpr int64_t kWalletFfiSuccess = 0;
+
+std::string ffiBytes32ToHex(const FfiBytes32& bytes)
+{
+    static constexpr char kHex[] = "0123456789abcdef";
+
+    std::string result(64, '0');
+
+    for (size_t i = 0; i < 32; ++i) {
+        result[i * 2] = kHex[(bytes.data[i] >> 4) & 0x0f];
+        result[i * 2 + 1] = kHex[bytes.data[i] & 0x0f];
+    }
+
+    return result;
+}
 
 constexpr const char* kDefaultSequencer =
     "https://testnet.lez.logos.co";
@@ -274,6 +320,50 @@ std::string FieldWalletModule::version() const {
 
 std::string FieldWalletModule::lez_core_version() {
     return modules().lez_core.version();
+}
+
+bool FieldWalletModule::keycard_available() {
+    const bool available = wallet_ffi_keycard_available();
+
+    if (!available) {
+        keycard_account_id_.clear();
+        keycard_key_path_.clear();
+    }
+
+    return available;
+}
+
+std::string FieldWalletModule::keycard_get_public_account(
+    const std::string& pin,
+    const std::string& key_path)
+{
+    keycard_account_id_.clear();
+    keycard_key_path_.clear();
+
+    if (pin.empty() || key_path.empty())
+        return {};
+
+    FfiBytes32 account_id{};
+
+    const WalletFfiError error =
+        wallet_ffi_keycard_get_public_account(
+            pin.c_str(),
+            key_path.c_str(),
+            &account_id);
+
+    if (static_cast<int64_t>(error) != kWalletFfiSuccess) {
+        fprintf(
+            stderr,
+            "keycard_get_public_account: wallet FFI error %d\n",
+            static_cast<int>(error));
+        return {};
+    }
+
+    keycard_account_id_ =
+        ffiBytes32ToHex(account_id);
+    keycard_key_path_ = key_path;
+
+    return keycard_account_id_;
 }
 
 
@@ -691,6 +781,20 @@ std::string FieldWalletModule::wallet_create_named(
         return out.dump();
     }
 
+    if (!writeRecoveryBackupPendingMarker(
+            paths.storage)) {
+        std::error_code ignored;
+
+        std::filesystem::remove(
+            paths.config,
+            ignored);
+
+        out["ok"] = false;
+        out["code"] =
+            "recovery_marker_write_failed";
+        return out.dump();
+    }
+
     const bool had_previous_wallet =
         wallet_open_;
 
@@ -738,6 +842,15 @@ std::string FieldWalletModule::wallet_create_named(
 
     if (!create_error.ok() ||
         mnemonic.empty()) {
+        {
+            std::error_code ignored;
+
+            std::filesystem::remove(
+                recoveryBackupPendingPath(
+                    paths.storage),
+                ignored);
+        }
+
 
         std::error_code ignored;
 
@@ -1226,39 +1339,46 @@ std::string FieldWalletModule::wallet_confirm_recovery_backup()
         return out.dump();
     }
 
-    logos::CallError ready_error;
+    std::string storage_path;
 
-    if (!lezDependencyReady(
-            modules(),
-            ready_error)) {
-        out["ok"] = false;
-        out["code"] = "dependency_not_ready";
-        return out.dump();
-    }
+    // After create/create_named the live wallet is authoritative.
+    // This is essential for named wallets under wallets/<name>/.
+    if (wallet_open_ &&
+        !current_storage_path_.empty()) {
+        storage_path =
+            current_storage_path_;
+    } else {
+        // Preserve the cold-start/default-wallet recovery path.
+        logos::CallError path_error;
 
-    logos::CallError path_error;
+        const auto paths =
+            defaultWalletPaths(
+                modules(),
+                path_error);
 
-    const auto paths =
-        defaultWalletPaths(
-            modules(),
-            path_error);
+        if (!path_error.ok()) {
+            out["ok"] = false;
+            out["code"] = "lez_error";
+            return out.dump();
+        }
 
-    if (!path_error.ok()) {
-        out["ok"] = false;
-        out["code"] = "lez_error";
-        return out.dump();
-    }
+        if (!paths.has_value()) {
+            out["ok"] = false;
+            out["code"] =
+                "wallet_dir_unavailable";
+            return out.dump();
+        }
 
-    if (!paths.has_value()) {
-        out["ok"] = false;
-        out["code"] = "wallet_dir_unavailable";
-        return out.dump();
+        storage_path =
+            paths->storage;
     }
 
     if (!std::filesystem::exists(
-            paths->storage)) {
+            storage_path)) {
         out["ok"] = false;
         out["code"] = "wallet_not_found";
+        out["storagePath"] =
+            storage_path;
         return out.dump();
     }
 
@@ -1267,18 +1387,22 @@ std::string FieldWalletModule::wallet_confirm_recovery_backup()
     const bool removed =
         std::filesystem::remove(
             recoveryBackupPendingPath(
-                paths->storage),
+                storage_path),
             ec);
 
     if (ec) {
         out["ok"] = false;
         out["code"] =
             "recovery_marker_remove_failed";
+        out["storagePath"] =
+            storage_path;
         return out.dump();
     }
 
     out["ok"] = true;
     out["cleared"] = removed;
+    out["storagePath"] =
+        storage_path;
 
     return out.dump();
 }
@@ -1550,7 +1674,8 @@ std::string FieldWalletModule::wallet_list_accounts()
     const auto owned_accounts =
         loadOwnedAccounts(
             modules(),
-            error);
+            error,
+            keycard_account_id_);
 
     if (!error.ok()) {
         out["ok"] = false;
@@ -1616,7 +1741,8 @@ std::string FieldWalletModule::wallet_get_balance(
     const auto owned_accounts =
         loadOwnedAccounts(
             modules(),
-            error);
+            error,
+            keycard_account_id_);
 
     if (!error.ok()) {
         out["ok"] = false;
@@ -2079,7 +2205,8 @@ std::string FieldWalletModule::provider_propose_public_to_private_transfer(
     const auto owned_accounts =
         loadOwnedAccounts(
             modules(),
-            inventory_error);
+            inventory_error,
+            keycard_account_id_);
 
     if (!inventory_error.ok()) {
         out["ok"] = false;
@@ -2180,7 +2307,8 @@ std::string FieldWalletModule::provider_propose_private_to_private_transfer(
     const auto owned_accounts =
         loadOwnedAccounts(
             modules(),
-            inventory_error);
+            inventory_error,
+            keycard_account_id_);
 
     if (!inventory_error.ok()) {
         out["ok"] = false;
@@ -2470,6 +2598,38 @@ std::string FieldWalletModule::approval_reject_transaction(
 std::string FieldWalletModule::approval_execute_transaction(
     uint64_t request_id)
 {
+    return approval_execute_transaction_impl(
+        request_id,
+        nullptr);
+}
+
+std::string FieldWalletModule::approval_execute_transaction_keycard(
+    uint64_t request_id,
+    const std::string& pin)
+{
+    // The generated RPC/QML layers may make additional string copies, so this
+    // is best-effort lifetime reduction rather than an absolute zeroization
+    // guarantee. The Rust FFI wraps its own PIN copy in Zeroizing<String>.
+    std::string pin_copy = pin;
+
+    const std::string result =
+        approval_execute_transaction_impl(
+            request_id,
+            &pin_copy);
+
+    std::fill(
+        pin_copy.begin(),
+        pin_copy.end(),
+        '\0');
+    pin_copy.clear();
+
+    return result;
+}
+
+std::string FieldWalletModule::approval_execute_transaction_impl(
+    uint64_t request_id,
+    const std::string* keycard_pin)
+{
     nlohmann::json out;
 
     if (!provider_state_.ready()) {
@@ -2537,6 +2697,101 @@ std::string FieldWalletModule::approval_execute_transaction(
         return out.dump();
     }
 
+    const bool connected_keycard_request =
+        !keycard_account_id_.empty() &&
+        request->account_id == keycard_account_id_;
+
+    if (keycard_pin == nullptr) {
+        // A disconnected Keycard must not become eligible for
+        // software signing merely because its active session was
+        // invalidated. Require membership in LEZ Core's native
+        // account inventory, without Field Wallet's Keycard append.
+        logos::CallError software_inventory_error;
+
+        const auto software_accounts_raw =
+            modules().lez_core.list_accounts(
+                &software_inventory_error);
+
+        if (!software_inventory_error.ok()) {
+            out["ok"] = false;
+            out["code"] = "software_account_check_failed";
+            return out.dump();
+        }
+
+        const auto software_accounts =
+            field::parseOwnedAccounts(
+                software_accounts_raw);
+
+        if (!software_accounts.has_value() ||
+            !field::findOwnedAccount(
+                *software_accounts,
+                request->account_id).has_value()) {
+            out["ok"] = false;
+            out["code"] = "software_account_not_owned";
+            return out.dump();
+        }
+
+        if (connected_keycard_request) {
+            out["ok"] = false;
+            out["code"] = "keycard_pin_required";
+            return out.dump();
+        }
+    } else {
+        if (keycard_pin->empty()) {
+            out["ok"] = false;
+            out["code"] = "keycard_pin_required";
+            return out.dump();
+        }
+
+        if (keycard_account_id_.empty() ||
+            keycard_key_path_.empty()) {
+            out["ok"] = false;
+            out["code"] = "keycard_not_connected";
+            return out.dump();
+        }
+
+        if (request->kind !=
+                field::TransactionRequestKind::
+                    PublicNativeTransfer ||
+            request->account_kind !=
+                field::AccountKind::Public) {
+            out["ok"] = false;
+            out["code"] =
+                "keycard_transaction_not_supported";
+            return out.dump();
+        }
+
+        if (request->account_id !=
+            keycard_account_id_) {
+            out["ok"] = false;
+            out["code"] = "keycard_account_mismatch";
+            return out.dump();
+        }
+
+        FfiBytes32 derived_account{};
+
+        const WalletFfiError verify_error =
+            wallet_ffi_keycard_get_public_account(
+                keycard_pin->c_str(),
+                keycard_key_path_.c_str(),
+                &derived_account);
+
+        if (static_cast<int64_t>(verify_error) !=
+            kWalletFfiSuccess) {
+            out["ok"] = false;
+            out["code"] =
+                "keycard_verification_failed";
+            return out.dump();
+        }
+
+        if (ffiBytes32ToHex(derived_account) !=
+            request->account_id) {
+            out["ok"] = false;
+            out["code"] = "keycard_account_mismatch";
+            return out.dump();
+        }
+    }
+
     if (!transaction_state_.beginExecution(
             request_id)) {
         out["ok"] = false;
@@ -2549,12 +2804,23 @@ std::string FieldWalletModule::approval_execute_transaction(
 
     switch (request->kind) {
     case field::TransactionRequestKind::PublicNativeTransfer:
-        lez_result =
-            modules().lez_core.transfer_public(
-                request->account_id,
-                request->destination_account_id,
-                request->amount_le16_hex,
-                &error);
+        if (keycard_pin != nullptr) {
+            lez_result =
+                modules().lez_core.transfer_public_keycard(
+                    request->account_id,
+                    request->destination_account_id,
+                    request->amount_le16_hex,
+                    *keycard_pin,
+                    keycard_key_path_,
+                    &error);
+        } else {
+            lez_result =
+                modules().lez_core.transfer_public(
+                    request->account_id,
+                    request->destination_account_id,
+                    request->amount_le16_hex,
+                    &error);
+        }
         break;
 
     case field::TransactionRequestKind::PrivateToPublicNativeTransfer:
@@ -2725,7 +2991,8 @@ std::string FieldWalletModule::approval_grant_request(
     const auto owned_accounts =
         loadOwnedAccounts(
             modules(),
-            inventory_error);
+            inventory_error,
+            keycard_account_id_);
 
     if (!inventory_error.ok()) {
         out["ok"] = false;

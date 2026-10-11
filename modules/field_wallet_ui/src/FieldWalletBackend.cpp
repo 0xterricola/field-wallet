@@ -126,6 +126,17 @@ FieldWalletBackend::FieldWalletBackend(
     setWalletError(QString());
     setWalletBusy(false);
     setWalletSwitchBusy(false);
+
+    setKeycardAvailable(false);
+    setKeycardBusy(false);
+    setKeycardAccountId(QString());
+    setKeycardError(QString());
+
+    setApprovalTransactionsJson(QStringLiteral("[]"));
+    setApprovalBusy(false);
+    setApprovalError(QString());
+    setApprovalResult(QString());
+
     setWalletFolderSelection(QString());
     setWalletFolderHasConfig(false);
     setWalletFolderHasStorage(false);
@@ -1175,4 +1186,332 @@ void FieldWalletBackend::createAccount(bool isPrivate)
         m_logos->field_wallet.wallet_create_public_accountAsyncResult(
             completed, Timeout(120000));
     }
+}
+
+void FieldWalletBackend::refreshKeycard()
+{
+    if (keycardBusy())
+        return;
+
+    setKeycardBusy(true);
+    setKeycardError(QString());
+
+    m_logos
+        ->field_wallet
+        .keycard_availableAsyncResult(
+            [this](logos::AsyncResult<bool> outcome) {
+                if (!outcome.ok()) {
+                    setKeycardAvailable(false);
+                    setKeycardAccountId(QString());
+                    setKeycardError(
+                        QStringLiteral("Keycard detection failed: ") +
+                        QString::fromStdString(
+                            outcome.error.message));
+                    setKeycardBusy(false);
+                    return;
+                }
+
+                setKeycardAvailable(outcome.value);
+
+                if (!outcome.value) {
+                    setKeycardAccountId(QString());
+                    setKeycardError(
+                        QStringLiteral(
+                            "No compatible Keycard detected."));
+                } else {
+                    setKeycardError(QString());
+                }
+
+                setKeycardBusy(false);
+            },
+            Timeout(10000));
+}
+
+void FieldWalletBackend::connectKeycard(QString pin)
+{
+    if (keycardBusy())
+        return;
+
+    if (pin.isEmpty()) {
+        setKeycardError(
+            QStringLiteral("Enter the Keycard PIN."));
+        return;
+    }
+
+    setKeycardBusy(true);
+    setKeycardError(QString());
+    setKeycardAccountId(QString());
+
+    QString pinForCall = pin;
+
+    m_logos
+        ->field_wallet
+        .keycard_get_public_accountAsyncResult(
+            pinForCall,
+            QStringLiteral("m/44'/60'/0'/0/0"),
+            [this](logos::AsyncResult<QString> outcome) {
+                if (!outcome.ok()) {
+                    setKeycardError(
+                        QStringLiteral(
+                            "Keycard request failed: ") +
+                        QString::fromStdString(
+                            outcome.error.message));
+                    setKeycardBusy(false);
+                    return;
+                }
+
+                const QString accountId =
+                    outcome.value.trimmed();
+
+                if (accountId.size() != 64) {
+                    setKeycardError(
+                        QStringLiteral(
+                            "PIN verification or Keycard "
+                            "account derivation failed."));
+                    setKeycardBusy(false);
+                    return;
+                }
+
+                setKeycardAvailable(true);
+                setKeycardAccountId(accountId);
+                setKeycardError(QString());
+                setKeycardBusy(false);
+            },
+            Timeout(30000));
+
+    // Minimize lifetime of the local PIN copies.
+    pin.fill(QChar('\0'));
+    pinForCall.fill(QChar('\0'));
+}
+
+
+
+void FieldWalletBackend::refreshApprovals()
+{
+    if (approvalBusy())
+        return;
+
+    setApprovalBusy(true);
+    setApprovalError(QString());
+
+    m_logos
+        ->field_wallet
+        .approval_list_transaction_requestsAsyncResult(
+            [this](logos::AsyncResult<QString> outcome) {
+                if (!outcome.ok()) {
+                    setApprovalError(
+                        QStringLiteral(
+                            "Approval refresh failed: ") +
+                        QString::fromStdString(
+                            outcome.error.message));
+                    setApprovalBusy(false);
+                    return;
+                }
+
+                QJsonObject result;
+
+                if (!parseObject(
+                        outcome.value,
+                        result)) {
+                    setApprovalError(
+                        QStringLiteral(
+                            "Approval list returned an "
+                            "invalid response."));
+                    setApprovalBusy(false);
+                    return;
+                }
+
+                if (!result
+                         .value(QStringLiteral("ok"))
+                         .toBool()) {
+                    setApprovalError(
+                        resultCode(
+                            result,
+                            QStringLiteral(
+                                "approval_list_failed")));
+                    setApprovalBusy(false);
+                    return;
+                }
+
+                const QJsonValue requests =
+                    result.value(
+                        QStringLiteral("requests"));
+
+                if (!requests.isArray()) {
+                    setApprovalError(
+                        QStringLiteral(
+                            "Approval list did not "
+                            "contain a requests array."));
+                    setApprovalBusy(false);
+                    return;
+                }
+
+                setApprovalTransactionsJson(
+                    QString::fromUtf8(
+                        QJsonDocument(
+                            requests.toArray())
+                            .toJson(
+                                QJsonDocument::Compact)));
+
+                setApprovalBusy(false);
+            },
+            Timeout(30000));
+}
+
+void FieldWalletBackend::rejectTransaction(
+    qulonglong requestId)
+{
+    if (approvalBusy())
+        return;
+
+    setApprovalBusy(true);
+    setApprovalError(QString());
+    setApprovalResult(QString());
+
+    m_logos
+        ->field_wallet
+        .approval_reject_transactionAsyncResult(
+            requestId,
+            [this](logos::AsyncResult<QString> outcome) {
+                if (!outcome.ok()) {
+                    setApprovalError(
+                        QStringLiteral(
+                            "Reject failed: ") +
+                        QString::fromStdString(
+                            outcome.error.message));
+                    setApprovalBusy(false);
+                    return;
+                }
+
+                QJsonObject result;
+
+                if (!parseObject(
+                        outcome.value,
+                        result) ||
+                    !result
+                         .value(QStringLiteral("ok"))
+                         .toBool()) {
+                    setApprovalError(
+                        QStringLiteral(
+                            "Transaction rejection failed."));
+                    setApprovalBusy(false);
+                    return;
+                }
+
+                setApprovalResult(outcome.value);
+                setApprovalBusy(false);
+                refreshApprovals();
+            },
+            Timeout(30000));
+}
+
+void FieldWalletBackend::executeTransaction(
+    qulonglong requestId)
+{
+    if (approvalBusy())
+        return;
+
+    setApprovalBusy(true);
+    setApprovalError(QString());
+    setApprovalResult(QString());
+
+    m_logos
+        ->field_wallet
+        .approval_execute_transactionAsyncResult(
+            requestId,
+            [this](logos::AsyncResult<QString> outcome) {
+                if (!outcome.ok()) {
+                    setApprovalError(
+                        QStringLiteral(
+                            "Transaction execution failed: ") +
+                        QString::fromStdString(
+                            outcome.error.message));
+                    setApprovalBusy(false);
+                    return;
+                }
+
+                QJsonObject result;
+
+                if (!parseObject(
+                        outcome.value,
+                        result) ||
+                    !result
+                         .value(QStringLiteral("ok"))
+                         .toBool()) {
+                    setApprovalError(
+                        QStringLiteral(
+                            "Transaction execution failed."));
+                    setApprovalBusy(false);
+                    return;
+                }
+
+                setApprovalResult(outcome.value);
+                setApprovalBusy(false);
+                refreshApprovals();
+            },
+            Timeout(120000));
+}
+
+void FieldWalletBackend::executeKeycardTransaction(
+    qulonglong requestId,
+    QString pin)
+{
+    if (approvalBusy())
+        return;
+
+    if (pin.isEmpty()) {
+        setApprovalError(
+            QStringLiteral(
+                "Enter the Keycard PIN."));
+        return;
+    }
+
+    setApprovalBusy(true);
+    setApprovalError(QString());
+    setApprovalResult(QString());
+
+    QString pinForCall = pin;
+
+    m_logos
+        ->field_wallet
+        .approval_execute_transaction_keycardAsyncResult(
+            requestId,
+            pinForCall,
+            [this](logos::AsyncResult<QString> outcome) {
+                if (!outcome.ok()) {
+                    setApprovalError(
+                        QStringLiteral(
+                            "Keycard transaction failed: ") +
+                        QString::fromStdString(
+                            outcome.error.message));
+                    setApprovalBusy(false);
+                    return;
+                }
+
+                QJsonObject result;
+
+                if (!parseObject(
+                        outcome.value,
+                        result) ||
+                    !result
+                         .value(QStringLiteral("ok"))
+                         .toBool()) {
+                    setApprovalError(
+                        QStringLiteral(
+                            "Keycard transaction failed."));
+                    setApprovalBusy(false);
+                    return;
+                }
+
+                setApprovalResult(outcome.value);
+                setApprovalBusy(false);
+                refreshApprovals();
+            },
+            Timeout(120000));
+
+    // Minimize lifetime of the mutable local copies.
+    // Qt/RemoteObjects may have already serialized/copy-constructed
+    // the value, so this is not an absolute zeroization guarantee.
+    pin.fill(QChar('\0'));
+    pinForCall.fill(QChar('\0'));
 }
